@@ -1,6 +1,7 @@
 import sys
 import logging
 import random
+import time
 
 import cv2
 from PyQt6 import QtGui
@@ -34,27 +35,42 @@ def clamp(n, min_n, max_n):
 
 
 class ODInspector(QMainWindow):
+    APP_NAME = "OD Inspector"
 
     def __init__(self):
         super().__init__()
 
+        self.capture = None
+        self.video_name = None
+        self.video_fps = None
+        self.total_frame_number = None
+        self.frame_position = None
+        self.video_timer_id = None
         self.current_frame = None
         self.current_frame_pixmap = None
         self.current_output_frame = None
         self.current_output_frame_pixmap = None
-        self.camera = None
-        self.video_name = None
-        self.total_frame_number = None
-        self.frame_position: int = 0
-        self.video_timer_id = None
-        self.frame_out_sync = False
+        self.frame_seeking_flag = False
+        self.frame_seeking_position = None
+        self.frame_jumping_flag = False
+        self.frame_jumping_position = None
 
-        # Some default settings
-        self.skip_seconds = 15
-        self.fps = 25
-        self.playback_speed = 1.0
-        self.timer_interval = lambda: int(1000 / (self.fps * self.playback_speed))
-        self.skip_frames = lambda: self.fps * self.skip_seconds
+        # Some settings
+        # self.transformation_mode = Qt.TransformationMode.FastTransformation  # Performance
+        self.transformation_mode = Qt.TransformationMode.SmoothTransformation  # Better viewing quality
+        self.forward_seconds = 15  # Seconds skipped using arrow key
+        self.max_fps = 30  # Limit of output rate, see frame seeking section for details
+        self.playback_speed_max = 32.0
+        self.playback_speed_min = 1 / 16
+        self.playback_speed = 1.0  # Default playback speed
+
+        # Some lambdas
+        # Get current playback fps
+        self.playback_fps = lambda: self.playback_speed * self.video_fps
+        # Get current frame interval with max fps limitation
+        self.timer_interval = lambda: int(1000 / min(float(self.max_fps), (self.video_fps * self.playback_speed)))
+        # Get frame number needed to skip
+        self.forward_frames = lambda: self.video_fps * self.forward_seconds
 
         # Slider configuration
         self.frame_position_slider = QSlider(Qt.Orientation.Horizontal)
@@ -90,6 +106,9 @@ class ODInspector(QMainWindow):
         self.button_speed_half.setIcon(fastforward_icon)
         control_center_layout.addWidget(self.button_speed_half, 1)
 
+        self.fps_display = QLabel()
+        control_center_layout.addWidget(self.fps_display)
+
         # Input and output viewport
         self.frame_input_display = QLabel('Press Ctrl+O to open a video')
         self.frame_input_display.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -101,11 +120,11 @@ class ODInspector(QMainWindow):
         viewport_layout.addWidget(self.frame_input_display, 1)
         viewport_layout.addWidget(self.frame_output_display, 1)
 
+        # Central widget and it's layout
         main_layout = QVBoxLayout()
         main_layout.addLayout(viewport_layout, 10)
         main_layout.addLayout(control_center_layout, 1)
         main_layout.addWidget(self.frame_position_slider)
-
         central_widget = QWidget(self)
         central_widget.setLayout(main_layout)
 
@@ -132,26 +151,49 @@ class ODInspector(QMainWindow):
 
         # Window management
         self.setCentralWidget(central_widget)
-        self.setWindowTitle("OD Inspector")
+        self.setWindowTitle()
         self.setWindowIcon(QIcon('images/icons/ic_app.png'))
         self.statusBar().showMessage('Ready')
         self.resize(800, 500)
         self.center()
         self.show()
 
+    def check_frame_seeking(self):
+        playback_fps = self.playback_fps()
+        if playback_fps <= self.max_fps:
+            return
+        ratio = playback_fps / self.max_fps
+        self.frame_seek(self.frame_position + ratio)
+
     def timerEvent(self, event: QTimerEvent):
         if event.timerId() == self.video_timer_id:
             self.video_timer_handler()
 
     def video_timer_handler(self):
-        if not self.frame_out_sync:
+        self.check_frame_seeking()
+
+        if not self.frame_jumping_flag and not self.frame_seeking_flag:
             self.frame_position += 1
         else:
-            logging.info(f'Seeking to {self.frame_position}th frame')
-            self.camera.set(cv2.CAP_PROP_POS_FRAMES, self.frame_position)
-            self.frame_out_sync = False
+            if self.frame_seeking_flag:
+                if self.frame_position >= self.frame_seeking_position:
+                    logging.warning(f'Can not seek backwards')
+                    self.frame_position += 1
+                else:
+                    logging.debug(f'Seeking from {self.frame_position} to {self.frame_seeking_position}')
+                    for i in range(int(self.frame_position), int(self.frame_seeking_position) - 1):
+                        self.capture.grab()  # grab() does not process frame data, for performance improvement
+                    self.frame_position = self.frame_seeking_position
+                self.frame_seeking_flag = False
+            if self.frame_jumping_flag:
+                t_s = time.time()
+                self.capture.set(cv2.CAP_PROP_POS_FRAMES, self.frame_jumping_position)
+                t = time.time() - t_s
+                logging.info(f'Jumping from {self.frame_position} to {self.frame_jumping_position}, {t}s used')
+                self.frame_position = self.frame_jumping_position
+                self.frame_jumping_flag = False
 
-        success, img = self.camera.read()
+        success, img = self.capture.read()
         if success:
             self.current_frame = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
             q_image = QtGui.QImage(self.current_frame.data,
@@ -172,36 +214,40 @@ class ODInspector(QMainWindow):
     def display_current_frame(self):
         scaled = self.current_frame_pixmap.scaled(self.frame_input_display.size(),
                                                   Qt.AspectRatioMode.KeepAspectRatio,
-                                                  Qt.TransformationMode.SmoothTransformation)
+                                                  self.transformation_mode)
         self.frame_input_display.setPixmap(scaled)
 
         scaled = self.current_output_frame_pixmap.scaled(self.frame_output_display.size(),
                                                          Qt.AspectRatioMode.KeepAspectRatio,
-                                                         Qt.TransformationMode.SmoothTransformation)
+                                                         self.transformation_mode)
         self.frame_output_display.setPixmap(scaled)
 
-        self.frame_position_slider.setValue(self.frame_position)
+        self.frame_position_slider.setValue(int(self.frame_position))
         logging.debug(f'Showing {self.frame_position}th frame')
 
     def frame_position_slider_callback(self):
         position = self.frame_position_slider.value()
-        self.update_frame_position(position)
         logging.debug(f'Slider moved to {position}')
+        self.frame_jump_to(position)
 
-    def update_frame_position(self, position):
-        self.frame_position = position
-        self.frame_out_sync = True
+    def frame_jump_to(self, position):
+        self.frame_jumping_position = position
+        self.frame_jumping_flag = True
+
+    def frame_seek(self, position):
+        self.frame_seeking_position = position
+        self.frame_seeking_flag = True
 
     def keyReleaseEvent(self, a0: QtGui.QKeyEvent):
         if self.video_timer_id is None:
             a0.accept()
             return
         if a0.key() == Qt.Key.Key_Right:
-            position = clamp(self.frame_position + self.skip_frames(), 0, self.total_frame_number)
-            self.update_frame_position(position)
+            position = clamp(self.frame_position + self.forward_frames(), 0, self.total_frame_number)
+            self.frame_jump_to(position)
         elif a0.key() == Qt.Key.Key_Left:
-            position = clamp(self.frame_position - self.skip_frames(), 0, self.total_frame_number)
-            self.update_frame_position(position)
+            position = clamp(self.frame_position - self.forward_frames(), 0, self.total_frame_number)
+            self.frame_jump_to(position)
         else:
             a0.accept()
 
@@ -222,23 +268,22 @@ class ODInspector(QMainWindow):
             self.video_timer_id = self.startTimer(self.timer_interval(), Qt.TimerType.CoarseTimer)
             logging.info('Video playback resumed')
 
-    def video_restart(self):
-        self.video_pause()
-        self.video_resume()
-
     def video_stop(self):
         self.video_pause()
-        self.camera.release()
-        self.camera = None
+        self.capture.release()
+        self.capture = None
         self.current_frame = None
         self.video_name = None
         self.total_frame_number = None
         self.frame_position = None
         self.video_timer_id = None
-        self.frame_out_sync = False
+        self.frame_jumping_flag = False
+        self.frame_seeking_flag = False
         self.frame_input_display.setText('Video unloaded')
         self.frame_output_display.setText('Video unloaded')
         self.widgets_enabled(False)
+        self.setWindowTitle()
+        self.fps_display.setText('')
         logging.info('Video playback stopped')
 
     def widgets_enabled(self, status: bool):
@@ -250,7 +295,7 @@ class ODInspector(QMainWindow):
         logging.info(f'Widgets: {status}')
 
     def video_pause_resume(self):
-        if self.camera is None:
+        if self.capture is None:
             logging.error(f'No video file loaded')
             return
         if self.video_timer_id is not None:
@@ -259,9 +304,11 @@ class ODInspector(QMainWindow):
             self.video_resume()
 
     def set_playback_speed(self, speed):
-        self.playback_speed = speed
-        self.video_restart()
-        self.statusBar().showMessage(f'Playback speed: {speed}x', 1000)
+        self.playback_speed = clamp(speed, self.playback_speed_min, self.playback_speed_max)
+        self.video_pause()
+        self.video_resume()
+        self.fps_display.setText(f'<b>{self.playback_speed}x '
+                                 f'{self.video_fps * self.playback_speed}fps</b>')
 
     def speed_double(self):
         self.set_playback_speed(self.playback_speed * 2)
@@ -280,18 +327,28 @@ class ODInspector(QMainWindow):
             self.load_video()
 
     def load_video(self):
-        self.camera = cv2.VideoCapture(self.video_name)
-        self.total_frame_number = int(self.camera.get(cv2.CAP_PROP_FRAME_COUNT))
-        self.fps = self.camera.get(cv2.CAP_PROP_FPS)
-        if self.fps > 60:
-            logging.error(f'Abnormal fps: {self.fps}, reset to default fps')
-            self.fps = 25
+        self.capture = cv2.VideoCapture(self.video_name)
+        self.total_frame_number = int(self.capture.get(cv2.CAP_PROP_FRAME_COUNT))
+        self.video_fps = self.capture.get(cv2.CAP_PROP_FPS)
+        if self.video_fps > 60:
+            logging.error(f'Abnormal fps: {self.video_fps}, reset to default fps')
+            self.video_fps = 25
         else:
-            logging.info(f'Video fps: {self.fps}')
+            logging.info(f'Video fps: {self.video_fps}')
         self.frame_position = 0
         self.frame_position_slider.setRange(0, self.total_frame_number)
+        self.setWindowTitle(self.video_name)
         self.widgets_enabled(True)
+        self.set_playback_speed(1.0)
         self.video_resume()
+
+    def setWindowTitle(self, title: str = None):
+        if title is None:
+            super().setWindowTitle(self.APP_NAME)
+            return
+        if len(title) > 55:
+            title = title[:25] + '...' + title[-25:]
+        super().setWindowTitle(f'{self.APP_NAME} - {title}')
 
     def closeEvent(self, event: QtGui.QCloseEvent):
         reply = QMessageBox.question(self, 'Message',
