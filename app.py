@@ -1,6 +1,8 @@
+import queue
 import sys
 import logging
 import random
+import threading
 import time
 
 import cv2
@@ -15,14 +17,20 @@ logging.basicConfig(level=logging.INFO)
 
 class InspectorImageProcessInterface:
     def detect(self, image):
+        raise NotImplementedError
+
+
+class TestImageProcessor(InspectorImageProcessInterface):
+    def detect(self, image):
         result = image.copy()
         c = random.randint(0, 0xFFFFFF)
         color = (c & 0xFF, c >> 8 & 0xFF, c >> 16 & 0xFF)
         cv2.putText(result, 'PROCESSED', (100, 100), cv2.FONT_HERSHEY_SIMPLEX, 3, color, 2)
+        time.sleep(0.2)  # Simulate processing lagging
         return result
 
 
-image_process = InspectorImageProcessInterface()
+image_processor = TestImageProcessor()
 
 
 def clamp(n, min_n, max_n):
@@ -32,6 +40,39 @@ def clamp(n, min_n, max_n):
         return max_n
     else:
         return n
+
+
+class ImageProcessQueue(threading.Thread):
+    def __init__(self, processor: InspectorImageProcessInterface, result_callback):
+        super().__init__()
+        self.exit_flag = False
+        self.image_queue = queue.Queue(3)
+        self.callback = result_callback
+        self.processor = processor
+        self.queue_lock = threading.Lock()
+
+    def add(self, image):
+        self.queue_lock.acquire()
+        if self.image_queue.full():
+            self.image_queue.get()  # remove one when full
+            logging.debug('Lagging occurred')
+        self.image_queue.put(image)
+        self.queue_lock.release()
+
+    def run(self):
+        while self.exit_flag is False:
+            self.queue_lock.acquire()
+            if not self.image_queue.empty():
+                image = self.image_queue.get()
+                self.queue_lock.release()
+                output = self.processor.detect(image)
+                self.callback(output)
+            else:
+                self.queue_lock.release()
+
+    def exit(self):
+        self.exit_flag = True
+        self.join()
 
 
 class ODInspector(QMainWindow):
@@ -54,6 +95,9 @@ class ODInspector(QMainWindow):
         self.frame_seeking_position = None
         self.frame_jumping_flag = False
         self.frame_jumping_position = None
+        self.image_process_queue = ImageProcessQueue(image_processor, self.display_output_frame)
+
+        self.image_process_queue.start()
 
         # Some settings
         # self.transformation_mode = Qt.TransformationMode.FastTransformation  # Performance
@@ -207,28 +251,28 @@ class ODInspector(QMainWindow):
                                    QtGui.QImage.Format.Format_RGB888)
             self.current_frame_pixmap = QtGui.QPixmap.fromImage(q_image)
 
-            self.current_output_frame = image_process.detect(self.current_frame)
-            q_image = QtGui.QImage(self.current_output_frame.data,
-                                   self.current_output_frame.shape[1],
-                                   self.current_output_frame.shape[0],
-                                   QtGui.QImage.Format.Format_RGB888)
-            self.current_output_frame_pixmap = QtGui.QPixmap.fromImage(q_image)
-
             self.display_current_frame()
+            self.image_process_queue.add(self.current_frame)
 
     def display_current_frame(self):
         scaled = self.current_frame_pixmap.scaled(self.frame_input_display.size(),
                                                   Qt.AspectRatioMode.KeepAspectRatio,
                                                   self.transformation_mode)
         self.frame_input_display.setPixmap(scaled)
+        self.frame_position_slider.setValue(int(self.frame_position))
+        logging.debug(f'Showing {self.frame_position}th frame')
 
+    def display_output_frame(self, image):
+        self.current_output_frame = image
+        q_image = QtGui.QImage(self.current_output_frame.data,
+                               self.current_output_frame.shape[1],
+                               self.current_output_frame.shape[0],
+                               QtGui.QImage.Format.Format_RGB888)
+        self.current_output_frame_pixmap = QtGui.QPixmap.fromImage(q_image)
         scaled = self.current_output_frame_pixmap.scaled(self.frame_output_display.size(),
                                                          Qt.AspectRatioMode.KeepAspectRatio,
                                                          self.transformation_mode)
         self.frame_output_display.setPixmap(scaled)
-
-        self.frame_position_slider.setValue(int(self.frame_position))
-        logging.debug(f'Showing {self.frame_position}th frame')
 
     def frame_position_slider_callback(self):
         position = self.frame_position_slider.value()
@@ -274,6 +318,7 @@ class ODInspector(QMainWindow):
             logging.info('Video playback resumed')
 
     def video_stop(self):
+        self.image_process_queue.exit()
         self.video_pause()
         self.capture.release()
         self.capture = None
@@ -361,6 +406,7 @@ class ODInspector(QMainWindow):
                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                                      QMessageBox.StandardButton.No)
         if reply == QMessageBox.StandardButton.Yes:
+            self.video_stop()  # Stop all work
             event.accept()
         else:
             event.ignore()
