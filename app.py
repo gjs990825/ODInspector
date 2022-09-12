@@ -180,16 +180,21 @@ class ODInspector(QMainWindow):
                     logging.warning(f'Can not seek backwards')
                     self.frame_position += 1
                 else:
-                    logging.debug(f'Seeking from {self.frame_position} to {self.frame_seeking_position}')
+                    t_s = time.time()
                     for i in range(int(self.frame_position), int(self.frame_seeking_position) - 1):
                         self.capture.grab()  # grab() does not process frame data, for performance improvement
                     self.frame_position = self.frame_seeking_position
+                    t = time.time() - t_s
+                    logging_using = logging.debug if self.playback_speed > 1.0 else logging.info
+                    logging_using('Seeking from %.1f to %.1f, %.3fs used' %
+                                  (self.frame_position, self.frame_seeking_position, t))
                 self.frame_seeking_flag = False
             if self.frame_jumping_flag:
                 t_s = time.time()
                 self.capture.set(cv2.CAP_PROP_POS_FRAMES, self.frame_jumping_position)
                 t = time.time() - t_s
-                logging.info(f'Jumping from {self.frame_position} to {self.frame_jumping_position}, {t}s used')
+                logging.info('Jumping from %.1f to %.1f, %.3fs used' %
+                             (self.frame_position, self.frame_jumping_position, t))
                 self.frame_position = self.frame_jumping_position
                 self.frame_jumping_flag = False
 
