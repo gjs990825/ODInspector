@@ -12,26 +12,17 @@ from PyQt6 import QtGui
 from PyQt6.QtCore import QCoreApplication, Qt, QTimerEvent
 from PyQt6.QtGui import QAction, QIcon
 from PyQt6.QtWidgets import QApplication, QWidget, QPushButton, QMessageBox, QMainWindow, QMenu, QHBoxLayout, QStyle, \
-    QSlider, QFileDialog, QVBoxLayout, QLabel, QSizePolicy
+    QSlider, QFileDialog, QVBoxLayout, QLabel, QSizePolicy, QComboBox, QLineEdit
 
-from maverick.object_detection.api.v1 import ODResult
+from maverick.object_detection.api.v1 import ODResult, Model
 
 logging.basicConfig(level=logging.DEBUG)
-
-
-def create_in_memory_image(image):
-    file = BytesIO()
-    image_f = Image.frombuffer('RGB', (image.shape[1], image.shape[0]), image, 'raw')
-    image_f.save(file, 'bmp')  # png format seems too time-consuming, use bmp instead
-    file.name = 'test.bmp'
-    file.seek(0)
-    return file
 
 
 class InspectorImageProcessInterface:
     def detect(self, image):
         cp = image.copy()
-        in_memory_image = create_in_memory_image(image)
+        in_memory_image = self.create_in_memory_image(image)
         results = self.request_detection(in_memory_image)
 
         t_s = time.time()
@@ -43,44 +34,56 @@ class InspectorImageProcessInterface:
         raise NotImplementedError
 
     @staticmethod
+    def create_in_memory_image(image):
+        file = BytesIO()
+        image_f = Image.frombuffer('RGB', (image.shape[1], image.shape[0]), image, 'raw')
+        image_f.save(file, 'bmp')  # png format seems too time-consuming, use bmp instead
+        file.name = 'test.bmp'
+        file.seek(0)
+        return file
+
+    @staticmethod
     def get_result_image(image, results: list[ODResult]):
         for result in results:
             cv2.rectangle(image, (result.points[0], result.points[1]),
                           (result.points[2], result.points[3]), (0, 255, 0), thickness=10)
 
+    def get_models(self) -> list[Model]:
+        raise NotImplementedError
 
-class TestImageProcessor(InspectorImageProcessInterface):
-    API_URL = 'http://localhost:5000/api/v1/detect/'
+    def set_current_model(self, model_name):
+        raise NotImplementedError
+
+    def get_model_names(self):
+        return [model.name for model in self.get_models()]
+
+
+class ImageProcessor(InspectorImageProcessInterface):
+    DETECTION_URL = '/api/v1/detect/'
+    GET_MODELS_URL = '/api/v1/model/list'
+    SET_MODEL_URL = '/api/v1/model/set'
+
+    def __init__(self, base_url):
+        self.base = base_url
+
+    def get_models(self):
+        response = requests.get(self.base + self.GET_MODELS_URL)
+        return Model.from_json(response.json())
+
+    def set_current_model(self, model_name):
+        response = requests.get(self.base + self.SET_MODEL_URL, params={'model_name': model_name})
+        logging.info(response.text)
 
     def request_detection(self, in_memory_image):
         t_s = time.time()
-        response = requests.post(self.API_URL, data=in_memory_image)
+        response = requests.post(self.base + self.DETECTION_URL, data=in_memory_image)
         logging.debug('Request uses %.4fs' % (time.time() - t_s))
         results = ODResult.from_json(response.json())
         logging.info(results)
         return results
 
-
-class FakeImageProcessor(InspectorImageProcessInterface):
-    def request_detection(self, in_memory_image):
-        return [
-            ODResult("0.9992254", "person", [
-                39,
-                124,
-                408,
-                512
-            ], "rectangle"),
-            ODResult("0.6662254", "dog", [
-                30,
-                10,
-                400,
-                500
-            ], "rectangle")
-        ]
-
-
-image_processor = TestImageProcessor()
-# image_processor = FakeImageProcessor()
+    def set_base_url(self, url):
+        self.base = url
 
 
 def clamp(n, min_n, max_n):
@@ -158,6 +161,9 @@ class ODInspector(QMainWindow):
         self.playback_speed_max = 32.0
         self.playback_speed_min = 1 / 16
         self.playback_speed = 1.0  # Default playback speed
+        self.server_url = 'http://localhost:5000'
+
+        self.image_processor = ImageProcessor(self.server_url)
 
         # Some lambdas
         # Get current playback fps
@@ -166,6 +172,18 @@ class ODInspector(QMainWindow):
         self.timer_interval = lambda: int(1000 / min(float(self.max_fps), (self.video_fps * self.playback_speed)))
         # Get frame number needed to skip
         self.forward_frames = lambda: self.video_fps * self.forward_seconds
+
+        model_setting_layout = QHBoxLayout()
+        self.server_url_input = QLineEdit(self.server_url)
+        load_button = QPushButton('Load')
+        load_button.clicked.connect(self.load_model_info)
+
+        self.model_combobox = QComboBox()
+        model_setting_layout.addWidget(QLabel('Server Address:'))
+        model_setting_layout.addWidget(self.server_url_input, 4)
+        model_setting_layout.addWidget(load_button, 2)
+        model_setting_layout.addWidget(QLabel('Select Model:'))
+        model_setting_layout.addWidget(self.model_combobox, 3)
 
         # Slider configuration
         self.frame_position_slider = QSlider(Qt.Orientation.Horizontal)
@@ -217,6 +235,7 @@ class ODInspector(QMainWindow):
 
         # Central widget and it's layout
         main_layout = QVBoxLayout()
+        main_layout.addLayout(model_setting_layout, 1)
         main_layout.addLayout(viewport_layout, 10)
         main_layout.addLayout(control_center_layout, 1)
         main_layout.addWidget(self.frame_position_slider)
@@ -252,6 +271,14 @@ class ODInspector(QMainWindow):
         self.resize(800, 500)
         self.center()
         self.show()
+
+    def load_model_info(self):
+        self.image_processor.set_base_url(self.server_url_input.text())
+        self.model_combobox.clear()
+        for model in self.image_processor.get_models():
+            self.model_combobox.addItem(f'{model.name}: {len(model.classes)}class(es)', model.name)
+        self.model_combobox.currentIndexChanged.connect(
+            lambda: self.image_processor.set_current_model(self.model_combobox.currentData()))
 
     def check_frame_seeking(self):
         playback_fps = self.playback_fps()
@@ -369,10 +396,12 @@ class ODInspector(QMainWindow):
             logging.info('Video playback resumed')
 
     def video_stop(self):
-        self.image_process_queue.exit()
+        if self.image_process_queue is not None:
+            self.image_process_queue.exit()
         self.video_pause()
-        self.capture.release()
-        self.capture = None
+        if self.capture is not None:
+            self.capture.release()
+            self.capture = None
         self.current_frame = None
         self.video_name = None
         self.total_frame_number = None
@@ -441,7 +470,7 @@ class ODInspector(QMainWindow):
         self.setWindowTitle(self.video_name)
         self.widgets_enabled(True)
         self.set_playback_speed(1.0)
-        self.image_process_queue = ImageProcessQueue(image_processor, self.display_output_frame)
+        self.image_process_queue = ImageProcessQueue(self.image_processor, self.display_output_frame)
         self.image_process_queue.start()
         self.video_resume()
 
