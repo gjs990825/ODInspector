@@ -1,36 +1,86 @@
+import logging
 import queue
 import sys
-import logging
-import random
 import threading
 import time
+from io import BytesIO
 
 import cv2
+import requests
+from PIL import Image
 from PyQt6 import QtGui
 from PyQt6.QtCore import QCoreApplication, Qt, QTimerEvent
 from PyQt6.QtGui import QAction, QIcon
 from PyQt6.QtWidgets import QApplication, QWidget, QPushButton, QMessageBox, QMainWindow, QMenu, QHBoxLayout, QStyle, \
     QSlider, QFileDialog, QVBoxLayout, QLabel, QSizePolicy
 
-logging.basicConfig(level=logging.INFO)
+from maverick.object_detection.api.v1 import ODResult
+
+logging.basicConfig(level=logging.DEBUG)
+
+
+def create_in_memory_image(image):
+    file = BytesIO()
+    image_f = Image.frombuffer('RGB', (image.shape[1], image.shape[0]), image, 'raw')
+    image_f.save(file, 'bmp')  # png format seems too time-consuming, use bmp instead
+    file.name = 'test.bmp'
+    file.seek(0)
+    return file
 
 
 class InspectorImageProcessInterface:
     def detect(self, image):
+        cp = image.copy()
+        in_memory_image = create_in_memory_image(image)
+        results = self.request_detection(in_memory_image)
+
+        t_s = time.time()
+        self.get_result_image(cp, results)
+        logging.debug('Image drawing uses %.4fs' % (time.time() - t_s))
+        return cp
+
+    def request_detection(self, in_memory_image):
         raise NotImplementedError
+
+    @staticmethod
+    def get_result_image(image, results: list[ODResult]):
+        for result in results:
+            cv2.rectangle(image, (result.points[0], result.points[1]),
+                          (result.points[2], result.points[3]), (0, 255, 0), thickness=10)
 
 
 class TestImageProcessor(InspectorImageProcessInterface):
-    def detect(self, image):
-        result = image.copy()
-        c = random.randint(0, 0xFFFFFF)
-        color = (c & 0xFF, c >> 8 & 0xFF, c >> 16 & 0xFF)
-        cv2.putText(result, 'PROCESSED', (100, 100), cv2.FONT_HERSHEY_SIMPLEX, 3, color, 2)
-        time.sleep(0.2)  # Simulate processing lagging
-        return result
+    API_URL = 'http://localhost:5000/api/v1/detect/'
+
+    def request_detection(self, in_memory_image):
+        t_s = time.time()
+        response = requests.post(self.API_URL, data=in_memory_image)
+        logging.debug('Request uses %.4fs' % (time.time() - t_s))
+        results = ODResult.from_json(response.json())
+        logging.info(results)
+        return results
+
+
+class FakeImageProcessor(InspectorImageProcessInterface):
+    def request_detection(self, in_memory_image):
+        return [
+            ODResult("0.9992254", "person", [
+                39,
+                124,
+                408,
+                512
+            ], "rectangle"),
+            ODResult("0.6662254", "dog", [
+                30,
+                10,
+                400,
+                500
+            ], "rectangle")
+        ]
 
 
 image_processor = TestImageProcessor()
+# image_processor = FakeImageProcessor()
 
 
 def clamp(n, min_n, max_n):
@@ -65,10 +115,13 @@ class ImageProcessQueue(threading.Thread):
             if not self.image_queue.empty():
                 image = self.image_queue.get()
                 self.queue_lock.release()
+                t_s = time.time()
                 output = self.processor.detect(image)
+                logging.info('Detection: %.4fs used' % (time.time() - t_s))
                 self.callback(output)
             else:
                 self.queue_lock.release()
+            time.sleep(0.01)  # TODO This loop runs too frequently
 
     def exit(self):
         self.exit_flag = True
@@ -95,9 +148,7 @@ class ODInspector(QMainWindow):
         self.frame_seeking_position = None
         self.frame_jumping_flag = False
         self.frame_jumping_position = None
-        self.image_process_queue = ImageProcessQueue(image_processor, self.display_output_frame)
-
-        self.image_process_queue.start()
+        self.image_process_queue = None
 
         # Some settings
         # self.transformation_mode = Qt.TransformationMode.FastTransformation  # Performance
@@ -390,6 +441,8 @@ class ODInspector(QMainWindow):
         self.setWindowTitle(self.video_name)
         self.widgets_enabled(True)
         self.set_playback_speed(1.0)
+        self.image_process_queue = ImageProcessQueue(image_processor, self.display_output_frame)
+        self.image_process_queue.start()
         self.video_resume()
 
     def setWindowTitle(self, title: str = None):
