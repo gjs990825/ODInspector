@@ -1,3 +1,4 @@
+import colorsys
 import logging
 import queue
 import sys
@@ -20,6 +21,12 @@ logging.basicConfig(level=logging.DEBUG)
 
 
 class InspectorImageProcessInterface:
+    def __init__(self):
+        self.models = []
+        self.current_model = None
+        self.current_classes = []
+        self.colors = []
+
     def detect(self, image):
         cp = image.copy()
         in_memory_image = self.create_in_memory_image(image)
@@ -42,20 +49,52 @@ class InspectorImageProcessInterface:
         file.seek(0)
         return file
 
-    @staticmethod
-    def get_result_image(image, results: list[ODResult]):
+    def get_result_image(self, image, results: list[ODResult]):
+        thickness = max(int(min((image.shape[1], image.shape[0])) / 150), 1)
         for result in results:
-            cv2.rectangle(image, (result.points[0], result.points[1]),
-                          (result.points[2], result.points[3]), (0, 255, 0), thickness=10)
+            label = '{} {:.2f}'.format(result.label, float(result.confidence))
+            color = self.get_class_color(result.label)
+            p1 = (result.points[0], result.points[1])
+            p2 = (result.points[2], result.points[3])
+            cv2.rectangle(image, p1, p2, color, thickness)
+            cv2.putText(image, label, (result.points[0], result.points[1] - thickness), cv2.FONT_HERSHEY_COMPLEX, 1,
+                        color, 2)
 
     def get_models(self) -> list[Model]:
+        if len(self.models) == 0:
+            self.update_models()
+        return self.models
+
+    def update_models(self):
         raise NotImplementedError
 
+    def get_current_classes(self) -> list[str]:
+        return self.current_model.classes
+
     def set_current_model(self, model_name):
-        raise NotImplementedError
+        self.current_model = next(model for model in self.models if model.name == model_name)
+        self.current_classes = self.current_model.classes
+        self.colors = self.get_colors(self.current_classes)
+
+    def get_class_color(self, class_name):
+        try:
+            index = self.current_classes.index(class_name)
+            return self.colors[index]
+        except ValueError as e:
+            logging.error(e)
+            return self.colors[0]
 
     def get_model_names(self):
         return [model.name for model in self.get_models()]
+
+    @staticmethod
+    def get_colors(classes):
+        num_classes = len(classes)
+        # see: https://github.com/bubbliiiing/yolov7-pytorch/blob/master/yolo.py#L92
+        hsv_tuples = [(x / num_classes, 1., 1.) for x in range(num_classes)]
+        colors = list(map(lambda x: colorsys.hsv_to_rgb(*x), hsv_tuples))
+        colors = list(map(lambda x: (int(x[0] * 255), int(x[1] * 255), int(x[2] * 255)), colors))
+        return colors
 
 
 class ImageProcessor(InspectorImageProcessInterface):
@@ -64,13 +103,16 @@ class ImageProcessor(InspectorImageProcessInterface):
     SET_MODEL_URL = '/api/v1/model/set'
 
     def __init__(self, base_url):
+        super().__init__()
         self.base = base_url
 
-    def get_models(self):
+    def update_models(self):
         response = requests.get(self.base + self.GET_MODELS_URL)
-        return Model.from_json(response.json())
+        self.models = Model.from_json(response.json())
+        self.set_current_model(self.models[0].name)
 
     def set_current_model(self, model_name):
+        super().set_current_model(model_name)
         response = requests.get(self.base + self.SET_MODEL_URL, params={'model_name': model_name})
         logging.info(response.text)
 
@@ -331,6 +373,9 @@ class ODInspector(QMainWindow):
 
             self.display_current_frame()
             self.image_process_queue.add(self.current_frame)
+        else:
+            logging.warning('Frame read failed')
+            self.video_pause()
 
     def display_current_frame(self):
         scaled = self.current_frame_pixmap.scaled(self.frame_input_display.size(),
