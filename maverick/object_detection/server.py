@@ -62,24 +62,3 @@ def set_weight():
     model_name = request.values['model_name']
     service.set_current_model(model_name)
     return 'OK'
-
-# USAGE:
-# from maverick.object_detection.api.v1 import ObjectDetectionServiceInterface
-# from maverick.object_detection import server
-#
-#
-# class ODService(ObjectDetectionServiceInterface):#
-#     def set_current_model(self, model_name: str):
-#         super(ODService, self).set_current_model(model_name)
-#         # load model here
-#
-#     def detect(self, image):
-#         if self.yolo is not None:
-#             return # do detection here
-#         logging.warning('No model selected')
-#         return []
-#
-#
-# if __name__ == '__main__':
-#     server.service = ODService()
-#     server.app.run()
