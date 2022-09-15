@@ -11,6 +11,12 @@ Screenshots
 -----
 ![](docs/images/Snipaste_2022-09-14_18-52-45.png)
 
+Requirements
+-----
+Tested on python 3.9, older version might not support some
+language features used in ODI api.
+Package requirements see [requirements.txt](requirements.txt).
+
 Server Implementation
 -----
 
@@ -34,15 +40,21 @@ Server Implementation
 ```python
 from maverick.object_detection.api.v1 import ObjectDetectionServiceInterface
 
-class ODService(ObjectDetectionServiceInterface):#
+class ODService(ObjectDetectionServiceInterface):
+    def __init__(self):
+        super().__init__()
+        self.yolo = None
+
     def set_current_model(self, model_name: str):
         super(ODService, self).set_current_model(model_name)
-        self.yolo = None
+        model = next(model for model in self.models if model.name == model_name)
         # load model here
+        self.yolo = YOLO(model_path=model.weight_path, classes_path=model.class_path)
 
     def detect(self, image):
         if self.yolo is not None:
-            return # do detection here
+            # do detection here
+            return self.yolo.detect_image_for_od_results(image)
         return []
 ```
 4. Set service and run app

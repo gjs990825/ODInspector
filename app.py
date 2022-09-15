@@ -13,7 +13,7 @@ from PyQt6 import QtGui
 from PyQt6.QtCore import QCoreApplication, Qt, QTimerEvent
 from PyQt6.QtGui import QAction, QIcon
 from PyQt6.QtWidgets import QApplication, QWidget, QPushButton, QMessageBox, QMainWindow, QMenu, QHBoxLayout, QStyle, \
-    QSlider, QFileDialog, QVBoxLayout, QLabel, QSizePolicy, QComboBox, QLineEdit
+    QSlider, QFileDialog, QVBoxLayout, QLabel, QSizePolicy, QComboBox, QLineEdit, QCheckBox
 
 from maverick.object_detection.api.v1 import ODResult, Model
 
@@ -145,6 +145,7 @@ class ImageProcessQueue(threading.Thread):
         self.callback = result_callback
         self.processor = processor
         self.queue_lock = threading.Lock()
+        self.is_processing = False
 
     def add(self, image):
         self.queue_lock.acquire()
@@ -159,14 +160,26 @@ class ImageProcessQueue(threading.Thread):
             self.queue_lock.acquire()
             if not self.image_queue.empty():
                 image = self.image_queue.get()
+                self.is_processing = True
                 self.queue_lock.release()
                 t_s = time.time()
                 output = self.processor.detect(image)
                 logging.info('Detection: %.4fs used' % (time.time() - t_s))
                 self.callback(output)
+                self.is_processing = False
             else:
                 self.queue_lock.release()
             time.sleep(0.01)  # TODO This loop runs too frequently
+
+    def finished(self):
+        self.queue_lock.acquire()
+        ret = self.image_queue.empty()
+        self.queue_lock.release()
+        return ret
+
+    def wait_for_complete(self):
+        while not self.finished() or self.is_processing:
+            time.sleep(0.01)
 
     def exit(self):
         self.exit_flag = True
@@ -203,6 +216,7 @@ class ODInspector(QMainWindow):
         self.playback_speed_max = 32.0
         self.playback_speed_min = 1 / 16
         self.playback_speed = 1.0  # Default playback speed
+        self.frame_sync = False  # Wait the detection output
         self.server_url = 'http://localhost:5000'
 
         self.image_processor = ImageProcessor(self.server_url)
@@ -264,6 +278,10 @@ class ODInspector(QMainWindow):
         self.fps_display = QLabel()
         control_center_layout.addWidget(self.fps_display)
 
+        frame_sync_check_box = QCheckBox('Frame Sync')
+        frame_sync_check_box.toggled.connect(self.set_frame_sync)
+        control_center_layout.addWidget(frame_sync_check_box)
+
         # Input and output viewport
         self.frame_input_display = QLabel('Press Ctrl+O to open a video')
         self.frame_input_display.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -313,6 +331,10 @@ class ODInspector(QMainWindow):
         self.resize(800, 500)
         self.center()
         self.show()
+
+    def set_frame_sync(self, status):
+        logging.info(f'Frame sync: {status}')
+        self.frame_sync = status
 
     def load_model_info(self):
         self.image_processor.set_base_url(self.server_url_input.text())
@@ -371,8 +393,11 @@ class ODInspector(QMainWindow):
                                    QtGui.QImage.Format.Format_RGB888)
             self.current_frame_pixmap = QtGui.QPixmap.fromImage(q_image)
 
+            if self.image_process_queue is not None:
+                self.image_process_queue.add(self.current_frame)
+                if self.frame_sync:
+                    self.image_process_queue.wait_for_complete()
             self.display_current_frame()
-            self.image_process_queue.add(self.current_frame)
         else:
             logging.warning('Frame read failed')
             self.video_pause()
