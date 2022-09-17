@@ -227,6 +227,11 @@ class ODInspector(QMainWindow):
         self.frame_jumping_position = None
         self.image_process_queue = None
 
+        self.input_playback_fps = 0.0
+        self.input_playback_last_t = 0
+        self.output_playback_fps = 0.0
+        self.output_playback_last_t = 0
+
         # Some settings
         # self.transformation_mode = Qt.TransformationMode.FastTransformation  # Performance
         self.transformation_mode = Qt.TransformationMode.SmoothTransformation  # Better viewing quality
@@ -302,6 +307,14 @@ class ODInspector(QMainWindow):
         frame_sync_check_box.toggled.connect(self.set_frame_sync)
         control_center_layout.addWidget(frame_sync_check_box)
 
+        play_back_infos = QHBoxLayout()
+        self.input_playback_info = QLabel()
+        self.input_playback_info.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.output_playback_info = QLabel()
+        self.output_playback_info.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        play_back_infos.addWidget(self.input_playback_info)
+        play_back_infos.addWidget(self.output_playback_info)
+
         # Input and output viewport
         self.frame_input_display = QLabel('Press Ctrl+O to open a video')
         self.frame_input_display.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -317,6 +330,7 @@ class ODInspector(QMainWindow):
         main_layout = QVBoxLayout()
         main_layout.addLayout(model_setting_layout, 1)
         main_layout.addLayout(viewport_layout, 10)
+        main_layout.addLayout(play_back_infos, 1)
         main_layout.addLayout(control_center_layout, 1)
         main_layout.addWidget(self.frame_position_slider)
         central_widget = QWidget(self)
@@ -424,6 +438,10 @@ class ODInspector(QMainWindow):
             self.video_pause()
 
     def display_current_frame(self):
+        now = time.time()
+        self.input_playback_fps = (self.input_playback_fps + (1.0 / (now - self.input_playback_last_t))) / 2
+        self.input_playback_last_t = now
+        self.input_playback_info.setText("Input: %.1f FPS" % self.input_playback_fps)
         scaled = self.current_frame_pixmap.scaled(self.frame_input_display.size(),
                                                   Qt.AspectRatioMode.KeepAspectRatio,
                                                   self.transformation_mode)
@@ -432,6 +450,11 @@ class ODInspector(QMainWindow):
         logging.debug(f'Showing {self.frame_position}th frame')
 
     def display_output_frame(self, image):
+        now = time.time()
+        self.output_playback_fps = (self.output_playback_fps + (1.0 / (now - self.output_playback_last_t))) / 2
+        self.output_playback_last_t = now
+        self.output_playback_info.setText("Output: %.1f FPS" % self.output_playback_fps)
+
         self.current_output_frame = image
         q_image = QtGui.QImage(self.current_output_frame.data,
                                self.current_output_frame.shape[1],
@@ -502,9 +525,11 @@ class ODInspector(QMainWindow):
         self.frame_seeking_flag = False
         self.frame_input_display.setText('Video unloaded')
         self.frame_output_display.setText('Video unloaded')
+        self.input_playback_info.clear()
+        self.output_playback_info.clear()
         self.widgets_enabled(False)
+        self.fps_display.clear()
         self.setWindowTitle()
-        self.fps_display.setText('')
         logging.info('Video playback stopped')
 
     def widgets_enabled(self, status: bool):
@@ -528,8 +553,7 @@ class ODInspector(QMainWindow):
         self.playback_speed = clamp(speed, self.playback_speed_min, self.playback_speed_max)
         self.video_pause()
         self.video_resume()
-        self.fps_display.setText(f'<b>{self.playback_speed}x '
-                                 f'{self.video_fps * self.playback_speed}fps</b>')
+        self.fps_display.setText(f'<b>{self.playback_speed}x -> {self.video_fps * self.playback_speed} FPS</b>')
 
     def speed_double(self):
         self.set_playback_speed(self.playback_speed * 2)
