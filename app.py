@@ -37,7 +37,7 @@ class InspectorImageProcessInterface:
         logging.debug('Image drawing uses %.4fs' % (time.time() - t_s))
         return cp
 
-    def request_detection(self, in_memory_image):
+    def request_detection(self, in_memory_image) -> list[ODResult]:
         raise NotImplementedError
 
     @staticmethod
@@ -128,6 +128,25 @@ class ImageProcessor(InspectorImageProcessInterface):
         self.base = url
 
 
+class DummyImageProcessor(InspectorImageProcessInterface):
+    def __init__(self, sleep=0.0):
+        super().__init__()
+        self.sleep = sleep
+
+    def request_detection(self, in_memory_image) -> list[ODResult]:
+        time.sleep(self.sleep)
+        return []
+
+    def update_models(self):
+        self.models = [
+            Model('Model1', 'model_path1', 'weight_path1', ['class1', 'class2']),
+            Model('Model2', 'model_path2', 'weight_path2', ['class1', 'class2', 'class3'])
+        ]
+
+    def set_base_url(self, url):
+        pass
+
+
 def clamp(n, min_n, max_n):
     if n < min_n:
         return min_n
@@ -212,14 +231,15 @@ class ODInspector(QMainWindow):
         # self.transformation_mode = Qt.TransformationMode.FastTransformation  # Performance
         self.transformation_mode = Qt.TransformationMode.SmoothTransformation  # Better viewing quality
         self.forward_seconds = 15  # Seconds skipped using arrow key
-        self.max_fps = 30  # Limit of output rate, see frame seeking section for details
+        self.max_fps = 60  # Limit of output rate, see frame seeking section for details
         self.playback_speed_max = 32.0
         self.playback_speed_min = 1 / 16
         self.playback_speed = 1.0  # Default playback speed
         self.frame_sync = False  # Wait the detection output
         self.server_url = 'http://localhost:5000'
 
-        self.image_processor = ImageProcessor(self.server_url)
+        # self.image_processor = ImageProcessor(self.server_url)
+        self.image_processor = DummyImageProcessor(1/15)  # Fake image processor that processes 15 image per second
 
         # Some lambdas
         # Get current playback fps
@@ -337,7 +357,8 @@ class ODInspector(QMainWindow):
         self.frame_sync = status
 
     def load_model_info(self):
-        self.image_processor.set_base_url(self.server_url_input.text())
+        self.server_url = self.server_url_input.text()
+        self.image_processor.set_base_url(self.server_url)
         self.model_combobox.clear()
         for model in self.image_processor.get_models():
             self.model_combobox.addItem(f'{model.name}: {len(model.classes)}class(es)', model.name)
