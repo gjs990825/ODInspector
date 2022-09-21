@@ -63,7 +63,13 @@ class Model:
         return Model.from_json(json.loads(j_str))
 
 
-class ObjectDetectionServiceInterface:
+class ODServiceInterface:
+    PATH_DETECT_WITH_BINARY = "/api/v1/detect_with_binary/"
+    PATH_DETECT_WITH_BINARY_FOR_IMAGE_RESULT = "/api/v1/detect_with_binary_for_image_result/"
+    PATH_DETECT_WITH_JSON = "/api/v1/detect_with_json/"
+    PATH_LIST_MODELS = "/api/v1/model/list"
+    PATH_SET_MODEL = "/api/v1/model/set"
+
     class NoSuchModelException(Exception):
         pass
 
@@ -88,6 +94,9 @@ class ObjectDetectionServiceInterface:
         return self.current_model.name
 
     def detect(self, image) -> list[ODResult]:
+        raise NotImplementedError
+
+    def detect_for_image_result(self, image):
         raise NotImplementedError
 
     def detect_using(self, image, weight_name: str):

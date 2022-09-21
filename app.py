@@ -4,52 +4,48 @@ import queue
 import sys
 import threading
 import time
-from io import BytesIO
 
 import cv2
+import numpy
 import requests
-from PIL import Image
 from PyQt6 import QtGui
 from PyQt6.QtCore import QCoreApplication, Qt, QTimerEvent
 from PyQt6.QtGui import QAction, QIcon
 from PyQt6.QtWidgets import QApplication, QWidget, QPushButton, QMessageBox, QMainWindow, QMenu, QHBoxLayout, QStyle, \
     QSlider, QFileDialog, QVBoxLayout, QLabel, QSizePolicy, QComboBox, QLineEdit, QCheckBox
 
-from maverick.object_detection.api.v1 import ODResult, Model
+from maverick.object_detection.api.utils import create_in_memory_image
+from maverick.object_detection.api.v1 import ODResult, Model, ODServiceInterface
 
 logging.basicConfig(level=logging.DEBUG)
 
 
 class InspectorImageProcessInterface:
-    def __init__(self):
+    def __init__(self, binary_result=False):
+        self.binary_result = binary_result
         self.models = []
         self.current_model = None
         self.current_classes = []
         self.colors = []
 
     def detect(self, image):
-        cp = image.copy()
-        in_memory_image = self.create_in_memory_image(image)
-        results = self.request_detection(in_memory_image)
-
-        t_s = time.time()
-        self.get_result_image(cp, results)
-        logging.debug('Image drawing uses %.4fs' % (time.time() - t_s))
-        return cp
+        in_memory_image = create_in_memory_image(image)
+        if not self.binary_result:
+            cp = image.copy()
+            results = self.request_detection(in_memory_image)
+            self.get_result_image(cp, results)
+            return cp
+        else:
+            return self.request_detection_for_image_result(in_memory_image)
 
     def request_detection(self, in_memory_image) -> list[ODResult]:
         raise NotImplementedError
 
-    @staticmethod
-    def create_in_memory_image(image):
-        file = BytesIO()
-        image_f = Image.frombuffer('RGB', (image.shape[1], image.shape[0]), image, 'raw')
-        image_f.save(file, 'bmp')  # png format seems too time-consuming, use bmp instead
-        file.name = 'test.bmp'
-        file.seek(0)
-        return file
+    def request_detection_for_image_result(self, in_memory_image):
+        raise NotImplementedError
 
     def get_result_image(self, image, results: list[ODResult]):
+        t_s = time.time()
         thickness = max(int(min((image.shape[1], image.shape[0])) / 150), 1)
         for result in results:
             label = '{} {:.2f}'.format(result.label, float(result.confidence))
@@ -59,6 +55,7 @@ class InspectorImageProcessInterface:
             cv2.rectangle(image, p1, p2, color, thickness)
             cv2.putText(image, label, (result.points[0], result.points[1] - thickness), cv2.FONT_HERSHEY_COMPLEX, 1,
                         color, 2)
+        logging.debug('Image drawing uses %.4fs' % (time.time() - t_s))
 
     def get_models(self) -> list[Model]:
         if len(self.models) == 0:
@@ -98,31 +95,43 @@ class InspectorImageProcessInterface:
 
 
 class ImageProcessor(InspectorImageProcessInterface):
-    DETECTION_URL = '/api/v1/detect/'
-    GET_MODELS_URL = '/api/v1/model/list'
-    SET_MODEL_URL = '/api/v1/model/set'
+    proxies = {
+        "http": None,
+        "https": None,
+    }
 
-    def __init__(self, base_url):
-        super().__init__()
+    def __init__(self, base_url, binary_result=False):
+        super().__init__(binary_result)
         self.base = base_url
 
     def update_models(self):
-        response = requests.get(self.base + self.GET_MODELS_URL)
+        response = requests.get(self.base + ODServiceInterface.PATH_LIST_MODELS, proxies=self.proxies)
         self.models = Model.from_json(response.json())
         self.set_current_model(self.models[0].name)
 
     def set_current_model(self, model_name):
         super().set_current_model(model_name)
-        response = requests.get(self.base + self.SET_MODEL_URL, params={'model_name': model_name})
+        response = requests.get(self.base + ODServiceInterface.PATH_SET_MODEL, params={'model_name': model_name},
+                                proxies=self.proxies)
         logging.info(response.text)
 
     def request_detection(self, in_memory_image):
         t_s = time.time()
-        response = requests.post(self.base + self.DETECTION_URL, data=in_memory_image)
+        response = requests.post(self.base + ODServiceInterface.PATH_DETECT_WITH_BINARY, data=in_memory_image,
+                                 proxies=self.proxies)
         logging.debug('Request uses %.4fs' % (time.time() - t_s))
         results = ODResult.from_json(response.json())
         logging.info(results)
         return results
+
+    def request_detection_for_image_result(self, in_memory_image):
+        t_s = time.time()
+        response = requests.post(self.base + ODServiceInterface.PATH_DETECT_WITH_BINARY_FOR_IMAGE_RESULT,
+                                 data=in_memory_image, proxies=self.proxies)
+        logging.debug('Request for image result uses %.4fs' % (time.time() - t_s))
+        buffer = numpy.frombuffer(response.content, dtype=numpy.uint8)
+        image_result = cv2.imdecode(buffer, cv2.IMREAD_COLOR)
+        return cv2.cvtColor(image_result, cv2.COLOR_BGR2RGB)
 
     def set_base_url(self, url):
         self.base = url
@@ -243,8 +252,9 @@ class ODInspector(QMainWindow):
         self.frame_sync = False  # Wait the detection output
         self.server_url = 'http://localhost:5000'
 
-        # self.image_processor = ImageProcessor(self.server_url)
-        self.image_processor = DummyImageProcessor(1/15)  # Fake image processor that processes 15 image per second
+        # self.image_processor = ImageProcessor(self.server_url, binary_result=False)
+        self.image_processor = ImageProcessor(self.server_url, binary_result=True)
+        # self.image_processor = DummyImageProcessor(1/15)  # Fake image processor that processes 15 image per second
 
         # Some lambdas
         # Get current playback fps
