@@ -138,6 +138,7 @@ class ImageProcessor(InspectorImageProcessInterface):
 
 
 class DummyImageProcessor(InspectorImageProcessInterface):
+
     def __init__(self, sleep=0.0):
         super().__init__()
         self.sleep = sleep
@@ -145,6 +146,11 @@ class DummyImageProcessor(InspectorImageProcessInterface):
     def request_detection(self, in_memory_image) -> list[ODResult]:
         time.sleep(self.sleep)
         return []
+
+    def request_detection_for_image_result(self, in_memory_image):
+        buffer = numpy.frombuffer(in_memory_image, dtype=numpy.uint8)
+        image_result = cv2.imdecode(buffer, cv2.IMREAD_COLOR)
+        return cv2.cvtColor(image_result, cv2.COLOR_BGR2RGB)
 
     def update_models(self):
         self.models = [
@@ -252,8 +258,8 @@ class ODInspector(QMainWindow):
         self.frame_sync = False  # Wait the detection output
         self.server_url = 'http://localhost:5000'
 
-        # self.image_processor = ImageProcessor(self.server_url, binary_result=False)
-        self.image_processor = ImageProcessor(self.server_url, binary_result=True)
+        self.image_processor = ImageProcessor(self.server_url, binary_result=False)
+        # self.image_processor = ImageProcessor(self.server_url, binary_result=True)
         # self.image_processor = DummyImageProcessor(1/15)  # Fake image processor that processes 15 image per second
 
         # Some lambdas
