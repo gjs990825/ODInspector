@@ -95,14 +95,16 @@ class InspectorImageProcessInterface:
 
 
 class ImageProcessor(InspectorImageProcessInterface):
-    proxies = {
-        "http": None,
-        "https": None,
-    }
-
-    def __init__(self, base_url, binary_result=False):
+    def __init__(self, base_url, binary_result=False, proxies=None):
         super().__init__(binary_result)
         self.base = base_url
+        self.proxies = proxies
+
+        if self.proxies is not None:
+            logging.warning('Proxy setting might introduce serious detection lagging')
+        else:
+            logging.warning('No proxy designated, this can be a problem when your system proxy is set but proxy '
+                            'server is not running.')
 
     def update_models(self):
         response = requests.get(self.base + ODServiceInterface.PATH_LIST_MODELS, proxies=self.proxies)
@@ -258,7 +260,7 @@ class ODInspector(QMainWindow):
         self.frame_sync = False  # Wait the detection output
         self.server_url = 'http://localhost:5000'
 
-        self.image_processor = ImageProcessor(self.server_url, binary_result=False)
+        self.image_processor = ImageProcessor(self.server_url)
         # self.image_processor = ImageProcessor(self.server_url, binary_result=True)
         # self.image_processor = DummyImageProcessor(1/15)  # Fake image processor that processes 15 image per second
 
