@@ -79,7 +79,7 @@ class InspectorImageProcessInterface:
             return self.colors[index]
         except ValueError as e:
             logging.error(e)
-            return self.colors[0]
+            return 0xFF, 0, 0
 
     def get_model_names(self):
         return [model.name for model in self.get_models()]
@@ -586,7 +586,7 @@ class ODInspector(QMainWindow):
         self.playback_speed = clamp(speed, self.playback_speed_min, self.playback_speed_max)
         self.video_pause()
         self.video_resume()
-        self.fps_display.setText(f'<b>{self.playback_speed}x -> {self.video_fps * self.playback_speed} FPS</b>')
+        self.fps_display.setText('<b>%.2fx -> %.2f FPS</b>' % (self.playback_speed, self.video_fps * self.playback_speed))
 
     def speed_double(self):
         self.set_playback_speed(self.playback_speed * 2)
