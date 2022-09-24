@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import QApplication, QWidget, QPushButton, QMessageBox, QMa
 from maverick.object_detection.api.utils import create_in_memory_image
 from maverick.object_detection.api.v1 import ODResult, Model, ODServiceInterface
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 
 
 class InspectorImageProcessInterface:
@@ -115,7 +115,7 @@ class ImageProcessor(InspectorImageProcessInterface):
         super().set_current_model(model_name)
         response = requests.get(self.base + ODServiceInterface.PATH_SET_MODEL, params={'model_name': model_name},
                                 proxies=self.proxies)
-        logging.info(response.text)
+        logging.debug(f'HTTP response:{response.text}')
 
     def request_detection(self, in_memory_image):
         t_s = time.time()
@@ -123,7 +123,7 @@ class ImageProcessor(InspectorImageProcessInterface):
                                  proxies=self.proxies)
         logging.debug('Request uses %.4fs' % (time.time() - t_s))
         results = ODResult.from_json(response.json())
-        logging.info(results)
+        logging.debug(results)
         return results
 
     def request_detection_for_image_result(self, in_memory_image):
@@ -200,7 +200,7 @@ class ImageProcessQueue(threading.Thread):
                 self.queue_lock.release()
                 t_s = time.time()
                 output = self.processor.detect(image)
-                logging.info('Detection: %.4fs used' % (time.time() - t_s))
+                logging.debug('Detection: %.4fs used' % (time.time() - t_s))
                 self.callback(output)
                 self.is_processing = False
             else:
@@ -304,7 +304,7 @@ class ODInspector(QMainWindow):
         stop_icon = self.style().standardIcon(QStyle.StandardPixmap.SP_MediaStop)
         self.button_stop.setIcon(stop_icon)
         # self.button_pause_resume.setShortcut(QKeySequence('Ctrl+Z'))
-        self.button_stop.clicked.connect(self.video_stop)
+        self.button_stop.clicked.connect(lambda: self.video_stop())
         control_center_layout.addWidget(self.button_stop, 2)
 
         fastforward_icon = self.style().standardIcon(QStyle.StandardPixmap.SP_MediaSeekForward)
@@ -452,8 +452,16 @@ class ODInspector(QMainWindow):
                     self.image_process_queue.wait_for_complete()
             self.display_current_frame()
         else:
-            logging.warning('Frame read failed')
-            self.video_pause()
+            playback_end = self.frame_position >= self.total_frame_number
+
+            if playback_end:
+                self.video_pause()
+                self.frame_jump_to(0)  # From the top!
+            else:
+                message = 'Frame read failed, file might be corrupted'
+                logging.warning(message)
+                logging.warning(f'Frame info:current {self.frame_position}, total {self.total_frame_number}')
+                self.video_stop(message)
 
     def display_current_frame(self):
         now = time.time()
@@ -517,7 +525,9 @@ class ODInspector(QMainWindow):
             play_pause_icon = self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay)
             self.button_pause_resume.setIcon(play_pause_icon)
             self.button_pause_resume.setText('Resume')
-            logging.info('Video playback paused')
+            message = 'Playback Paused'
+            self.statusBar().showMessage(message)
+            logging.info(message)
 
     def video_resume(self):
         if self.video_timer_id is None:
@@ -525,9 +535,11 @@ class ODInspector(QMainWindow):
             self.button_pause_resume.setIcon(play_pause_icon)
             self.button_pause_resume.setText('Pause')
             self.video_timer_id = self.startTimer(self.timer_interval(), Qt.TimerType.CoarseTimer)
-            logging.info('Video playback resumed')
+            message = 'Playback Resumed'
+            self.statusBar().showMessage(message)
+            logging.info(message)
 
-    def video_stop(self):
+    def video_stop(self, message=None):
         if self.image_process_queue is not None:
             self.image_process_queue.exit()
         self.video_pause()
@@ -541,14 +553,17 @@ class ODInspector(QMainWindow):
         self.video_timer_id = None
         self.frame_jumping_flag = False
         self.frame_seeking_flag = False
-        self.frame_input_display.setText('Video unloaded')
-        self.frame_output_display.setText('Video unloaded')
+        message = 'Playback Stopped' if message is None else message
+        logging.info(message)
+        self.frame_input_display.setText(message)
+        self.frame_output_display.setText(message)
         self.input_playback_info.clear()
         self.output_playback_info.clear()
         self.widgets_enabled(False)
         self.fps_display.clear()
         self.setWindowTitle()
-        logging.info('Video playback stopped')
+        self.statusBar().showMessage(message)
+        logging.info(message)
 
     def widgets_enabled(self, status: bool):
         self.button_pause_resume.setEnabled(status)
