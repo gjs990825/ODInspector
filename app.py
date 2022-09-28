@@ -259,6 +259,7 @@ class ODInspector(QMainWindow):
         self.playback_speed = 1.0  # Default playback speed
         self.frame_sync = False  # Wait the detection output
         self.server_url = 'http://localhost:5000'
+        self.window_size = 1300, 700
 
         self.image_processor = ImageProcessor(self.server_url)
         # self.image_processor = ImageProcessor(self.server_url, binary_result=True)
@@ -380,7 +381,7 @@ class ODInspector(QMainWindow):
         self.setWindowTitle()
         self.setWindowIcon(QIcon('images/icons/ic_app.png'))
         self.statusBar().showMessage('Ready')
-        self.resize(800, 500)
+        self.resize(*self.window_size)
         self.center()
         self.show()
 
@@ -395,7 +396,12 @@ class ODInspector(QMainWindow):
         for model in self.image_processor.get_models():
             self.model_combobox.addItem(f'{model.name}: {len(model.classes)}class(es)', model.name)
         self.model_combobox.currentIndexChanged.connect(
-            lambda: self.image_processor.set_current_model(self.model_combobox.currentData()))
+            lambda: self.change_model(self.model_combobox.currentData()))
+
+    def change_model(self, model_name):
+        if model_name is None:
+            return
+        self.image_processor.set_current_model(model_name)
 
     def check_frame_seeking(self):
         playback_fps = self.playback_fps()
