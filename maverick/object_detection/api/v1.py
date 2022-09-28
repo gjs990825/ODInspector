@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 @dataclass()
 class ODResult:
-    def __init__(self, confidence, label, points, type):
+    def __init__(self, confidence: str, label: str, points: list[int], type: str):
         self.confidence = confidence
         self.label = label
         self.points = points
@@ -21,11 +21,6 @@ class ODResult:
             results.append(ODResult(**i))
         return results
 
-    confidence: str
-    label: str
-    points: list[int]
-    type: str
-
 
 @dataclass
 class Model:
@@ -41,7 +36,7 @@ class Model:
         self.weight_path = weight_path
         self.class_path = class_path
         self.classes = classes
-        if len(classes) == 0:
+        if len(classes) == 0 and len(self.class_path) != 0:
             with open(self.class_path, 'r') as f:
                 self.classes = f.read().splitlines()
 
