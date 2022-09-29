@@ -235,9 +235,7 @@ class ODInspector(QMainWindow):
         self.frame_position = None
         self.video_timer_id = None
         self.current_frame = None
-        self.current_frame_pixmap = None
         self.current_output_frame = None
-        self.current_output_frame_pixmap = None
         self.frame_seeking_flag = False
         self.frame_seeking_position = None
         self.frame_jumping_flag = False
@@ -258,6 +256,7 @@ class ODInspector(QMainWindow):
         self.playback_speed_min = 1 / 16
         self.playback_speed = 1.0  # Default playback speed
         self.frame_sync = False  # Wait the detection output
+        self.show_input = True  # Display input frame
         self.server_url = 'http://localhost:5000'
         self.window_size = 1300, 700
 
@@ -326,13 +325,18 @@ class ODInspector(QMainWindow):
         frame_sync_check_box.toggled.connect(self.set_frame_sync)
         control_center_layout.addWidget(frame_sync_check_box)
 
-        play_back_infos = QHBoxLayout()
+        show_input_check_box = QCheckBox('Show Input')
+        show_input_check_box.setChecked(self.show_input)
+        show_input_check_box.toggled.connect(self.set_show_input)
+        control_center_layout.addWidget(show_input_check_box)
+
+        self.play_back_infos = QHBoxLayout()
         self.input_playback_info = QLabel()
         self.input_playback_info.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.output_playback_info = QLabel()
         self.output_playback_info.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        play_back_infos.addWidget(self.input_playback_info)
-        play_back_infos.addWidget(self.output_playback_info)
+        self.play_back_infos.addWidget(self.input_playback_info)
+        self.play_back_infos.addWidget(self.output_playback_info)
 
         # Input and output viewport
         self.frame_input_display = QLabel('Press Ctrl+O to open a video')
@@ -341,15 +345,15 @@ class ODInspector(QMainWindow):
         self.frame_output_display = QLabel('Output will be here')
         self.frame_output_display.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.frame_output_display.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
-        viewport_layout = QHBoxLayout()
-        viewport_layout.addWidget(self.frame_input_display, 1)
-        viewport_layout.addWidget(self.frame_output_display, 1)
+        self.viewport_layout = QHBoxLayout()
+        self.viewport_layout.addWidget(self.frame_input_display)
+        self.viewport_layout.addWidget(self.frame_output_display)
 
         # Central widget and it's layout
         main_layout = QVBoxLayout()
         main_layout.addLayout(model_setting_layout, 1)
-        main_layout.addLayout(viewport_layout, 10)
-        main_layout.addLayout(play_back_infos, 1)
+        main_layout.addLayout(self.viewport_layout, 10)
+        main_layout.addLayout(self.play_back_infos)
         main_layout.addLayout(control_center_layout, 1)
         main_layout.addWidget(self.frame_position_slider)
         central_widget = QWidget(self)
@@ -388,6 +392,24 @@ class ODInspector(QMainWindow):
     def set_frame_sync(self, status):
         logging.info(f'Frame sync: {status}')
         self.frame_sync = status
+
+    def set_show_input(self, status):
+        logging.info(f'Show input: {status}')
+        self.show_input = status
+        if status:
+            self.viewport_layout.removeWidget(self.frame_output_display)
+            self.viewport_layout.addWidget(self.frame_input_display)
+            self.viewport_layout.addWidget(self.frame_output_display)
+
+            self.play_back_infos.removeWidget(self.output_playback_info)
+            self.play_back_infos.addWidget(self.input_playback_info)
+            self.play_back_infos.addWidget(self.output_playback_info)
+        else:
+            self.frame_input_display.clear()
+            self.viewport_layout.removeWidget(self.frame_input_display)
+
+            self.input_playback_info.clear()
+            self.play_back_infos.removeWidget(self.input_playback_info)
 
     def load_model_info(self):
         self.server_url = self.server_url_input.text()
@@ -446,17 +468,15 @@ class ODInspector(QMainWindow):
         success, img = self.capture.read()
         if success:
             self.current_frame = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            q_image = QtGui.QImage(self.current_frame.data,
-                                   self.current_frame.shape[1],
-                                   self.current_frame.shape[0],
-                                   QtGui.QImage.Format.Format_RGB888)
-            self.current_frame_pixmap = QtGui.QPixmap.fromImage(q_image)
 
             if self.image_process_queue is not None:
                 self.image_process_queue.add(self.current_frame)
                 if self.frame_sync:
                     self.image_process_queue.wait_for_complete()
-            self.display_current_frame()
+            if self.show_input:
+                self.display_current_frame()
+
+            self.frame_position_slider.setValue(int(self.frame_position))
         else:
             playback_end = self.frame_position >= self.total_frame_number
 
@@ -469,34 +489,35 @@ class ODInspector(QMainWindow):
                 logging.warning(f'Frame info:current {self.frame_position}, total {self.total_frame_number}')
                 self.video_stop(message)
 
+    def ui_image_process(self, source, target):
+        q_image = QtGui.QImage(source.data,
+                               source.shape[1],
+                               source.shape[0],
+                               QtGui.QImage.Format.Format_RGB888)
+        pixmap = QtGui.QPixmap.fromImage(q_image)
+        scaled = pixmap.scaled(target.size(),
+                               Qt.AspectRatioMode.KeepAspectRatio,
+                               self.transformation_mode)
+        target.setPixmap(scaled)
+
     def display_current_frame(self):
         now = time.time()
         self.input_playback_fps = (self.input_playback_fps + (1.0 / (now - self.input_playback_last_t))) / 2
         self.input_playback_last_t = now
         self.input_playback_info.setText("Input: %.1f FPS" % self.input_playback_fps)
-        scaled = self.current_frame_pixmap.scaled(self.frame_input_display.size(),
-                                                  Qt.AspectRatioMode.KeepAspectRatio,
-                                                  self.transformation_mode)
-        self.frame_input_display.setPixmap(scaled)
-        self.frame_position_slider.setValue(int(self.frame_position))
+
+        self.ui_image_process(self.current_frame, self.frame_input_display)
         logging.debug(f'Showing {self.frame_position}th frame')
 
     def display_output_frame(self, image):
+        self.current_output_frame = image
+
         now = time.time()
         self.output_playback_fps = (self.output_playback_fps + (1.0 / (now - self.output_playback_last_t))) / 2
         self.output_playback_last_t = now
         self.output_playback_info.setText("Output: %.1f FPS" % self.output_playback_fps)
 
-        self.current_output_frame = image
-        q_image = QtGui.QImage(self.current_output_frame.data,
-                               self.current_output_frame.shape[1],
-                               self.current_output_frame.shape[0],
-                               QtGui.QImage.Format.Format_RGB888)
-        self.current_output_frame_pixmap = QtGui.QPixmap.fromImage(q_image)
-        scaled = self.current_output_frame_pixmap.scaled(self.frame_output_display.size(),
-                                                         Qt.AspectRatioMode.KeepAspectRatio,
-                                                         self.transformation_mode)
-        self.frame_output_display.setPixmap(scaled)
+        self.ui_image_process(self.current_output_frame, self.frame_output_display)
 
     def frame_position_slider_callback(self):
         position = self.frame_position_slider.value()
@@ -592,7 +613,8 @@ class ODInspector(QMainWindow):
         self.playback_speed = clamp(speed, self.playback_speed_min, self.playback_speed_max)
         self.video_pause()
         self.video_resume()
-        self.fps_display.setText('<b>%.2fx -> %.2f FPS</b>' % (self.playback_speed, self.video_fps * self.playback_speed))
+        self.fps_display.setText('<b>%.2fx -> %.2f FPS</b>' %
+                                 (self.playback_speed, self.video_fps * self.playback_speed))
 
     def speed_double(self):
         self.set_playback_speed(self.playback_speed * 2)
