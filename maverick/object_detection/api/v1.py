@@ -12,7 +12,7 @@ class ODResult:
 
     @staticmethod
     def from_json_string(json_string):
-        ODResult.from_json(json.loads(json_string))
+        return ODResult.from_json(json.loads(json_string))
 
     @staticmethod
     def from_json(j):
