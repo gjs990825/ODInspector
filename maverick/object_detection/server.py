@@ -7,7 +7,7 @@ from PIL import Image
 from flask import Flask
 from flask import request
 
-from maverick.object_detection.api.utils import create_in_memory_image_from_pil_image
+from maverick.object_detection.utils import create_in_memory_image_from_pil_image
 from maverick.object_detection.api.v1 import ODServiceInterface
 
 dictConfig({

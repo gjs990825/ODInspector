@@ -1,4 +1,3 @@
-import colorsys
 import logging
 import queue
 import sys
@@ -13,90 +12,19 @@ from PyQt6.QtCore import QCoreApplication, Qt, QTimerEvent
 from PyQt6.QtGui import QAction, QIcon
 from PyQt6.QtWidgets import QApplication, QWidget, QPushButton, QMessageBox, QMainWindow, QMenu, QHBoxLayout, QStyle, \
     QSlider, QFileDialog, QVBoxLayout, QLabel, QSizePolicy, QComboBox, QLineEdit, QCheckBox
+from shapely.geometry import Polygon
 
-from maverick.object_detection.api.utils import create_in_memory_image
+from maverick.object_detection.analyzer import ODResultAnalyzer, TrespassingAnalyzer
+from maverick.object_detection.image_rocessor import ImageProcessorInterface
+from maverick.object_detection.utils import clamp
 from maverick.object_detection.api.v1 import ODResult, Model, ODServiceInterface
 
 logging.basicConfig(level=logging.INFO)
 
 
-class InspectorImageProcessInterface:
-    def __init__(self, binary_result=False):
-        self.binary_result = binary_result
-        self.models = []
-        self.current_model = None
-        self.current_classes = []
-        self.colors = []
-
-    def detect(self, image):
-        in_memory_image = create_in_memory_image(image)
-        if not self.binary_result:
-            cp = image.copy()
-            results = self.request_detection(in_memory_image)
-            self.get_result_image(cp, results)
-            return cp
-        else:
-            return self.request_detection_for_image_result(in_memory_image)
-
-    def request_detection(self, in_memory_image) -> list[ODResult]:
-        raise NotImplementedError
-
-    def request_detection_for_image_result(self, in_memory_image):
-        raise NotImplementedError
-
-    def get_result_image(self, image, results: list[ODResult]):
-        t_s = time.time()
-        thickness = max(int(min((image.shape[1], image.shape[0])) / 150), 1)
-        for result in results:
-            label = '{} {:.2f}'.format(result.label, float(result.confidence))
-            color = self.get_class_color(result.label)
-            p1 = (result.points[0], result.points[1])
-            p2 = (result.points[2], result.points[3])
-            cv2.rectangle(image, p1, p2, color, thickness)
-            cv2.putText(image, label, (result.points[0], result.points[1] - thickness), cv2.FONT_HERSHEY_COMPLEX, 1,
-                        color, 2)
-        logging.debug('Image drawing uses %.4fs' % (time.time() - t_s))
-
-    def get_models(self) -> list[Model]:
-        if len(self.models) == 0:
-            self.update_models()
-        return self.models
-
-    def update_models(self):
-        raise NotImplementedError
-
-    def get_current_classes(self) -> list[str]:
-        return self.current_model.classes
-
-    def set_current_model(self, model_name):
-        self.current_model = next(model for model in self.models if model.name == model_name)
-        self.current_classes = self.current_model.classes
-        self.colors = self.get_colors(self.current_classes)
-
-    def get_class_color(self, class_name):
-        try:
-            index = self.current_classes.index(class_name)
-            return self.colors[index]
-        except ValueError as e:
-            logging.error(e)
-            return 0xFF, 0, 0
-
-    def get_model_names(self):
-        return [model.name for model in self.get_models()]
-
-    @staticmethod
-    def get_colors(classes):
-        num_classes = len(classes)
-        # see: https://github.com/bubbliiiing/yolov7-pytorch/blob/master/yolo.py#L92
-        hsv_tuples = [(x / num_classes, 1., 1.) for x in range(num_classes)]
-        colors = list(map(lambda x: colorsys.hsv_to_rgb(*x), hsv_tuples))
-        colors = list(map(lambda x: (int(x[0] * 255), int(x[1] * 255), int(x[2] * 255)), colors))
-        return colors
-
-
-class ImageProcessor(InspectorImageProcessInterface):
-    def __init__(self, base_url, binary_result=False, proxies=None):
-        super().__init__(binary_result)
+class ImageProcessor(ImageProcessorInterface):
+    def __init__(self, base_url, analyzers: list[ODResultAnalyzer], binary_result=False, proxies=None):
+        super().__init__(binary_result, analyzers)
         self.base = base_url
         self.proxies = proxies
 
@@ -139,7 +67,7 @@ class ImageProcessor(InspectorImageProcessInterface):
         self.base = url
 
 
-class DummyImageProcessor(InspectorImageProcessInterface):
+class DummyImageProcessor(ImageProcessorInterface):
 
     def __init__(self, sleep=0.0):
         super().__init__()
@@ -164,17 +92,8 @@ class DummyImageProcessor(InspectorImageProcessInterface):
         pass
 
 
-def clamp(n, min_n, max_n):
-    if n < min_n:
-        return min_n
-    elif n > max_n:
-        return max_n
-    else:
-        return n
-
-
 class ImageProcessQueue(threading.Thread):
-    def __init__(self, processor: InspectorImageProcessInterface, result_callback):
+    def __init__(self, processor: ImageProcessorInterface, result_callback):
         super().__init__()
         self.exit_flag = False
         self.image_queue = queue.Queue(3)
@@ -260,7 +179,22 @@ class ODInspector(QMainWindow):
         self.server_url = 'http://localhost:5000'
         self.window_size = 1300, 700
 
-        self.image_processor = ImageProcessor(self.server_url)
+        self.image_processor = ImageProcessor(self.server_url, analyzers=[
+            TrespassingAnalyzer(
+                [Polygon(((1000, 500), (600, 700), (300, 600), (300, 200)))],
+                ['people_normal'],
+                0.5,
+                (30, 90, 70, 90),
+                (0x00, 0xFF, 0x00)
+            ),
+            TrespassingAnalyzer(
+                [Polygon(((400, 50), (600, 350), (200, 350)))],
+                ['people_riding'],
+                0.5,
+                (0, 100, 0, 30),
+                (0x00, 0x00, 0xFF)
+            )
+        ])
         # self.image_processor = ImageProcessor(self.server_url, binary_result=True)
         # self.image_processor = DummyImageProcessor(1/15)  # Fake image processor that processes 15 image per second
 

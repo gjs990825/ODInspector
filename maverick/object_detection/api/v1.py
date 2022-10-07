@@ -1,5 +1,6 @@
 import json
 from dataclasses import dataclass
+from shapely.geometry import Polygon
 
 
 @dataclass()
@@ -20,6 +21,52 @@ class ODResult:
         for i in j:
             results.append(ODResult(**i))
         return results
+
+    def get_polygon(self, abcd=(0, 100, 0, 100)):
+        """
+        |---(a%)--------(b%)---→
+        |    |           |     |
+        |----|-----------|-----|(c%)
+        |    |###########|     |
+        |    |#Take This#|     |
+        |    |###########|     |
+        |----|-----------|-----|(d%)
+        |    |           |     |
+        |----------------------↓
+        """
+        if self.type == 'rectangle':
+            x_start = self.points[0]
+            y_start = self.points[1]
+            dx = self.points[2] - self.points[0]
+            dy = self.points[3] - self.points[1]
+            a, b, c, d = abcd
+            xa = int(dx * (a / 100) + x_start)
+            xb = int(dx * (b / 100) + x_start)
+            yc = int(dy * (c / 100) + y_start)
+            yd = int(dy * (d / 100) + y_start)
+            return Polygon(((xa, yc), (xa, yd), (xb, yd), (xb, yc)))
+        raise NotImplementedError
+
+    def get_two_points_list(self):
+        return self.points
+
+    def get_anchor2(self):
+        if self.type != 'rectangle':
+            raise TypeError('Only rectangle can have 2 point anchor')
+        return (self.points[0], self.points[1]), (self.points[2], self.points[3])
+
+    def get_anchor4(self):
+        if self.type != 'rectangle':
+            raise TypeError('Only rectangle can have 4 point anchor')
+        return (self.points[0], self.points[1]), \
+               (self.points[0], self.points[3]), \
+               (self.points[2], self.points[3]), \
+               (self.points[2], self.points[1])
+
+    def __eq__(self, o: object) -> bool:
+        if not isinstance(o, ODResult):
+            return False
+        return self.points == o.points and self.label == o.label and self.type == o.type and self.confidence == o.confidence
 
 
 @dataclass
