@@ -5,6 +5,11 @@ from shapely.geometry import Polygon
 
 @dataclass()
 class ODResult:
+    confidence: str
+    label: str
+    points: list[int]
+    type: str
+
     def __init__(self, confidence: str, label: str, points: list[int], type: str):
         self.confidence = confidence
         self.label = label

@@ -50,6 +50,7 @@ class ImageProcessor(ImageProcessorInterface):
         response = requests.post(self.base + ODServiceInterface.PATH_DETECT_WITH_BINARY, data=in_memory_image,
                                  proxies=self.proxies)
         logging.debug('Request uses %.4fs' % (time.time() - t_s))
+        logging.debug(response.json())
         results = ODResult.from_json(response.json())
         logging.debug(results)
         return results
