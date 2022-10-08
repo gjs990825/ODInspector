@@ -12,18 +12,17 @@ from PyQt6.QtCore import QCoreApplication, Qt, QTimerEvent
 from PyQt6.QtGui import QAction, QIcon
 from PyQt6.QtWidgets import QApplication, QWidget, QPushButton, QMessageBox, QMainWindow, QMenu, QHBoxLayout, QStyle, \
     QSlider, QFileDialog, QVBoxLayout, QLabel, QSizePolicy, QComboBox, QLineEdit, QCheckBox
-from shapely.geometry import Polygon
 
 from maverick.object_detection.analyzer import ODResultAnalyzer, TrespassingAnalyzer
+from maverick.object_detection.api.v1 import ODResult, Model, ODServiceInterface
 from maverick.object_detection.image_rocessor import ImageProcessorInterface
 from maverick.object_detection.utils import clamp
-from maverick.object_detection.api.v1 import ODResult, Model, ODServiceInterface
 
 logging.basicConfig(level=logging.INFO)
 
 
 class ImageProcessor(ImageProcessorInterface):
-    def __init__(self, base_url, analyzers: list[ODResultAnalyzer], binary_result=False, proxies=None):
+    def __init__(self, base_url, analyzers: list[ODResultAnalyzer] = None, binary_result=False, proxies=None):
         super().__init__(binary_result, analyzers)
         self.base = base_url
         self.proxies = proxies
@@ -180,22 +179,7 @@ class ODInspector(QMainWindow):
         self.server_url = 'http://localhost:5000'
         self.window_size = 1300, 700
 
-        self.image_processor = ImageProcessor(self.server_url, analyzers=[
-            TrespassingAnalyzer(
-                [Polygon(((1000, 500), (600, 700), (300, 600), (300, 200)))],
-                ['people_normal'],
-                0.5,
-                (30, 90, 70, 90),
-                (0x00, 0xFF, 0x00)
-            ),
-            TrespassingAnalyzer(
-                [Polygon(((400, 50), (600, 350), (200, 350)))],
-                ['people_riding'],
-                0.5,
-                (0, 100, 0, 30),
-                (0x00, 0x00, 0xFF)
-            )
-        ])
+        self.image_processor = ImageProcessor(self.server_url)
         # self.image_processor = ImageProcessor(self.server_url, binary_result=True)
         # self.image_processor = DummyImageProcessor(1/15)  # Fake image processor that processes 15 image per second
 
@@ -299,11 +283,24 @@ class ODInspector(QMainWindow):
         menu_bar = self.menuBar()
         menu_bar.addMenu(file_menu)
 
+        analyzer_menu = QMenu('&Analyzer', self)
+        menu_bar.addMenu(analyzer_menu)
+        load_analyzer_action = QAction('Trespassing Analyzer', self)
+        load_analyzer_action.setShortcut('Ctrl+T')
+        load_analyzer_action.setStatusTip('Open Trespassing Analyzer config file')
+        load_analyzer_action.triggered.connect(self.open_trespassing_analyzer_config_file)
+        analyzer_menu.addAction(load_analyzer_action)
+
+        clear_analyzer_action = QAction('Clear Analyzer', self)
+        clear_analyzer_action.setShortcut('Ctrl+Shift+A')
+        clear_analyzer_action.triggered.connect(lambda: self.image_processor.set_analyzers([]))
+        analyzer_menu.addAction(clear_analyzer_action)
+
         open_icon = self.style().standardIcon(QStyle.StandardPixmap.SP_DriveDVDIcon)
         open_action = QAction(open_icon, '&Open', self)
         open_action.setShortcut('Ctrl+O')
         open_action.setStatusTip('Open video file')
-        open_action.triggered.connect(self.open_file)
+        open_action.triggered.connect(self.open_video_file)
         file_menu.addAction(open_action)
 
         exit_icon = self.style().standardIcon(QStyle.StandardPixmap.SP_TitleBarCloseButton)
@@ -557,7 +554,7 @@ class ODInspector(QMainWindow):
     def speed_half(self):
         self.set_playback_speed(self.playback_speed * 0.5)
 
-    def open_file(self):
+    def open_video_file(self):
         file_name, video_type = QFileDialog.getOpenFileName(self,
                                                             "Open a video file",
                                                             "videos",
@@ -566,6 +563,16 @@ class ODInspector(QMainWindow):
             logging.info(f'Open file {file_name}')
             self.video_name = file_name
             self.load_video()
+
+    def open_trespassing_analyzer_config_file(self):
+        file_name, file_type = QFileDialog.getOpenFileName(self,
+                                                           "Open a trespassing analyzer configuration file",
+                                                           "config",
+                                                           "*.json;;All Files(*)")
+        if file_name != '':
+            logging.info(f'Open file {file_name}')
+            analyzers = TrespassingAnalyzer.from_file(file_name)
+            self.image_processor.set_analyzers(analyzers)
 
     def load_video(self):
         self.capture = cv2.VideoCapture(self.video_name)

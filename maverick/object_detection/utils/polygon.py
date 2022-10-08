@@ -27,3 +27,11 @@ def draw_polygon_outline(image, polygon: Polygon, thickness, color):
 def rectangle_polygon_to_two_points(polygon: Polygon):
     x, y = polygon.exterior.coords.xy
     return (x[0], y[0]), (x[2], y[2])
+
+
+def get_polygon_points(polygon: Polygon):
+    x, y = polygon.exterior.coords.xy
+    points = []
+    for i in range(len(x) - 1):
+        points.append((int(x[i]), int(y[i])))
+    return points

@@ -24,7 +24,7 @@ class ImageProcessorInterface:
                 analyzer.analyze(results)
                 analyzer.draw_conclusion(cp)
                 drew_results.extend(analyzer.get_last_results())
-            for drew_result in drew_results:
+            for drew_result in set(drew_results):
                 results.remove(drew_result)
             self.draw_result_image(cp, results)
             return cp
@@ -62,6 +62,9 @@ class ImageProcessorInterface:
         self.current_model = next(model for model in self.models if model.name == model_name)
         self.current_classes = self.current_model.classes
         self.colors = get_colors(self.current_classes)
+
+    def set_analyzers(self, analyzers: list[ODResultAnalyzer]):
+        self.analyzers = analyzers
 
     def get_class_color(self, class_name):
         try:

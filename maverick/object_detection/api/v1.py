@@ -73,6 +73,9 @@ class ODResult:
             return False
         return self.points == o.points and self.label == o.label and self.type == o.type and self.confidence == o.confidence
 
+    def __hash__(self):
+        return hash(str(self))
+
 
 @dataclass
 class Model:

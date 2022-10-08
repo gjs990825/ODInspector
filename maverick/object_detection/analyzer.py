@@ -1,8 +1,9 @@
+import json
 import cv2
 from shapely.geometry import Polygon
 
 from maverick.object_detection.api.v1 import ODResult
-from maverick.object_detection.utils.polygon import draw_polygon_outline, in_target_proportion
+from maverick.object_detection.utils.polygon import draw_polygon_outline, in_target_proportion, get_polygon_points
 
 
 class ODResultAnalyzer:
@@ -20,7 +21,18 @@ class ODResultAnalyzer:
 
 
 class TrespassingAnalyzer(ODResultAnalyzer):
-    def __init__(self, forbidden_areas: list[Polygon], detection_targets: list[str], threshold, abcd, color):
+    forbidden_areas: list[Polygon]
+    detection_targets: list[str]
+    threshold: float
+    abcd: tuple[int, int, int, int]
+    color: tuple[int, int, int]
+
+    def __init__(self,
+                 forbidden_areas: list[Polygon],
+                 detection_targets: list[str],
+                 threshold: float,
+                 abcd: tuple[int, int, int, int],
+                 color: tuple[int, int, int]):
         super().__init__()
         self.color = color
         self.threshold = threshold
@@ -52,3 +64,38 @@ class TrespassingAnalyzer(ODResultAnalyzer):
     def draw_forbidden_area(self, image, thickness, color):
         for forbidden_area in self.forbidden_areas:
             draw_polygon_outline(image, forbidden_area, thickness, color)
+
+    def __str__(self):
+        areas = []
+        for p in self.forbidden_areas:
+            areas.append(get_polygon_points(p))
+        return json.dumps({
+            'forbidden_areas': areas,
+            'detection_targets': self.detection_targets,
+            'threshold': self.threshold,
+            'abcd': self.abcd,
+            'color': self.color
+        })
+
+    def __repr__(self):
+        return self.__str__()
+
+    def to_json(self):
+        return self.__str__()
+
+    @staticmethod
+    def from_json(json_obj):
+        forbidden_areas = [Polygon(points) for points in json_obj['forbidden_areas']]
+        return TrespassingAnalyzer(forbidden_areas,
+                                   json_obj['detection_targets'],
+                                   json_obj['threshold'],
+                                   json_obj['abcd'],
+                                   json_obj['color'])
+
+    @staticmethod
+    def from_file(path):
+        analyzers = []
+        with open(path, 'r') as f:
+            for analyzer in json.load(f):
+                analyzers.append(TrespassingAnalyzer.from_json(analyzer))
+        return analyzers
