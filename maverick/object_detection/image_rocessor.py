@@ -23,7 +23,7 @@ class ImageProcessorInterface:
             for analyzer in self.analyzers:
                 analyzer.analyze(results)
                 analyzer.draw_conclusion(cp)
-                drew_results.extend(analyzer.get_last_results())
+                drew_results.extend(analyzer.get_drew_results())
             for drew_result in set(drew_results):
                 results.remove(drew_result)
             self.draw_result_image(cp, results)
