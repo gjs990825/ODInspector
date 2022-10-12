@@ -1,4 +1,5 @@
 import logging
+import os
 import queue
 import sys
 import threading
@@ -147,8 +148,9 @@ class ODInspector(QMainWindow):
     def __init__(self):
         super().__init__()
 
+        self.recorder = None
         self.capture = None
-        self.video_name = None
+        self.video_path = None
         self.video_fps = None
         self.total_frame_number = None
         self.frame_position = None
@@ -178,6 +180,7 @@ class ODInspector(QMainWindow):
         self.show_input = True  # Display input frame
         self.server_url = 'http://localhost:5000'
         self.window_size = 1300, 700
+        self.save_path = './recordings'  # recording path
 
         self.image_processor = ImageProcessor(self.server_url)
         # self.image_processor = ImageProcessor(self.server_url, binary_result=True)
@@ -296,6 +299,18 @@ class ODInspector(QMainWindow):
         clear_analyzer_action.triggered.connect(lambda: self.image_processor.set_analyzers([]))
         analyzer_menu.addAction(clear_analyzer_action)
 
+        recorder_menu = QMenu('&Recorder', self)
+        menu_bar.addMenu(recorder_menu)
+        start_rec_action = QAction('Start Recording', self)
+        start_rec_action.setShortcut('Ctrl+R')
+        start_rec_action.setStatusTip('Save output as video')
+        start_rec_action.triggered.connect(self.start_recording)
+        stop_rec_action = QAction('Stop Recording', self)
+        stop_rec_action.setShortcut('Ctrl+Shift+R')
+        stop_rec_action.triggered.connect(self.stop_recording)
+        recorder_menu.addAction(start_rec_action)
+        recorder_menu.addAction(stop_rec_action)
+
         open_icon = self.style().standardIcon(QStyle.StandardPixmap.SP_DriveDVDIcon)
         open_action = QAction(open_icon, '&Open', self)
         open_action.setShortcut('Ctrl+O')
@@ -320,6 +335,23 @@ class ODInspector(QMainWindow):
         self.resize(*self.window_size)
         self.center()
         self.show()
+
+    def start_recording(self):
+        try:
+            size = self.get_output_size()
+        except ValueError:
+            self.statusBar().showMessage('Nothing playing!')
+            return
+        path = os.path.join(self.save_path, f'{time.time()}.mp4')
+        logging.info(f'Recording to {path}')
+        self.recorder = cv2.VideoWriter(path, cv2.VideoWriter_fourcc(*'mp4v'), int(self.video_fps), size)
+        self.statusBar().showMessage('Recording...')
+
+    def stop_recording(self):
+        if self.recorder is not None:
+            self.recorder.release()
+            self.recorder = None
+            self.statusBar().showMessage('Stop recording.')
 
     def set_frame_sync(self, status):
         logging.info(f'Frame sync: {status}')
@@ -421,6 +453,11 @@ class ODInspector(QMainWindow):
                 logging.warning(f'Frame info:current {self.frame_position}, total {self.total_frame_number}')
                 self.video_stop(message)
 
+    def get_output_size(self):
+        if self.current_frame is None:
+            raise ValueError
+        return self.current_frame.shape[1], self.current_frame.shape[0]
+
     def ui_image_process(self, source, target):
         q_image = QtGui.QImage(source.data,
                                source.shape[1],
@@ -450,6 +487,9 @@ class ODInspector(QMainWindow):
         self.output_playback_info.setText("Output: %.1f FPS" % self.output_playback_fps)
 
         self.ui_image_process(self.current_output_frame, self.frame_output_display)
+
+        if self.recorder is not None:
+            self.recorder.write(cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
 
     def frame_position_slider_callback(self):
         position = self.frame_position_slider.value()
@@ -506,7 +546,7 @@ class ODInspector(QMainWindow):
             self.capture.release()
             self.capture = None
         self.current_frame = None
-        self.video_name = None
+        self.video_path = None
         self.total_frame_number = None
         self.frame_position = None
         self.video_timer_id = None
@@ -561,7 +601,7 @@ class ODInspector(QMainWindow):
                                                             "*.mp4;;*.asf;;All Files(*)")
         if file_name != '':
             logging.info(f'Open file {file_name}')
-            self.video_name = file_name
+            self.video_path = file_name
             self.load_video()
 
     def open_trespassing_analyzer_config_file(self):
@@ -575,7 +615,7 @@ class ODInspector(QMainWindow):
             self.image_processor.set_analyzers(analyzers)
 
     def load_video(self):
-        self.capture = cv2.VideoCapture(self.video_name)
+        self.capture = cv2.VideoCapture(self.video_path)
         self.total_frame_number = int(self.capture.get(cv2.CAP_PROP_FRAME_COUNT))
         self.video_fps = self.capture.get(cv2.CAP_PROP_FPS)
         if self.video_fps > 60:
@@ -585,7 +625,7 @@ class ODInspector(QMainWindow):
             logging.info(f'Video fps: {self.video_fps}')
         self.frame_position = 0
         self.frame_position_slider.setRange(0, self.total_frame_number)
-        self.setWindowTitle(self.video_name)
+        self.setWindowTitle(self.video_path)
         self.widgets_enabled(True)
         self.set_playback_speed(1.0)
         self.image_process_queue = ImageProcessQueue(self.image_processor, self.display_output_frame)
