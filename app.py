@@ -177,9 +177,9 @@ class ODInspector(QMainWindow):
         self.playback_speed_min = 1 / 16
         self.playback_speed = 1.0  # Default playback speed
         self.frame_sync = False  # Wait the detection output
-        self.show_input = True  # Display input frame
+        self.show_input = False  # Display input frame
         self.server_url = 'http://localhost:5000'
-        self.window_size = 1300, 700
+        self.window_size = 1200, 800
         self.save_path = './recordings'  # recording path
 
         self.image_processor = ImageProcessor(self.server_url)
@@ -329,11 +329,13 @@ class ODInspector(QMainWindow):
         exit_action.setShortcut('Ctrl+Q')
         exit_action.setStatusTip('Exit application')
         exit_action.triggered.connect(QCoreApplication.exit)
+        # TODO exit problem
         file_menu.addAction(exit_action)
 
         self.widgets_enabled(False)
 
         # Window management
+        self.set_show_input(self.show_input)
         self.setCentralWidget(central_widget)
         self.setWindowTitle()
         self.setWindowIcon(QIcon('images/icons/ic_app.png'))
