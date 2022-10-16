@@ -14,7 +14,7 @@ from PyQt6.QtGui import QAction, QIcon
 from PyQt6.QtWidgets import QApplication, QWidget, QPushButton, QMessageBox, QMainWindow, QMenu, QHBoxLayout, QStyle, \
     QSlider, QFileDialog, QVBoxLayout, QLabel, QSizePolicy, QComboBox, QLineEdit, QCheckBox
 
-from maverick.object_detection.analyzer import ODResultAnalyzer, TrespassingAnalyzer
+from maverick.object_detection.analyzer import ODResultAnalyzer, TrespassingAnalyzer, IllegalEnteringAnalyzer
 from maverick.object_detection.api.v1 import ODResult, Model, ODServiceInterface
 from maverick.object_detection.image_rocessor import ImageProcessorInterface
 from maverick.object_detection.utils import clamp
@@ -288,11 +288,17 @@ class ODInspector(QMainWindow):
 
         analyzer_menu = QMenu('&Analyzer', self)
         menu_bar.addMenu(analyzer_menu)
-        load_analyzer_action = QAction('Trespassing Analyzer', self)
-        load_analyzer_action.setShortcut('Ctrl+T')
-        load_analyzer_action.setStatusTip('Open Trespassing Analyzer config file')
-        load_analyzer_action.triggered.connect(self.open_trespassing_analyzer_config_file)
-        analyzer_menu.addAction(load_analyzer_action)
+        load_trespassing_analyzer_action = QAction('Trespassing Analyzer', self)
+        load_trespassing_analyzer_action.setShortcut('Ctrl+T')
+        load_trespassing_analyzer_action.setStatusTip('Open Trespassing Analyzer config file')
+        load_trespassing_analyzer_action.triggered.connect(self.load_trespassing_analyzer_config)
+        analyzer_menu.addAction(load_trespassing_analyzer_action)
+
+        load_illegal_entering_analyzer_action = QAction('Illegal Entering Analyzer', self)
+        load_illegal_entering_analyzer_action.setShortcut('Ctrl+I')
+        load_illegal_entering_analyzer_action.setStatusTip('Open Illegal Entering Analyzer config file')
+        load_illegal_entering_analyzer_action.triggered.connect(self.load_illegal_entering_analyzer_config)
+        analyzer_menu.addAction(load_illegal_entering_analyzer_action)
 
         clear_analyzer_action = QAction('Clear Analyzer', self)
         clear_analyzer_action.setShortcut('Ctrl+Shift+A')
@@ -595,24 +601,37 @@ class ODInspector(QMainWindow):
         self.set_playback_speed(self.playback_speed * 0.5)
 
     def open_video_file(self):
-        file_name, video_type = QFileDialog.getOpenFileName(self,
-                                                            "Open a video file",
-                                                            "videos",
-                                                            "*.mp4;;*.asf;;All Files(*)")
-        if file_name != '':
-            logging.info(f'Open file {file_name}')
-            self.video_path = file_name
-            self.load_video()
+        file_name, _ = QFileDialog.getOpenFileName(self,
+                                                   "Open a video file",
+                                                   "videos",
+                                                   "*.mp4;;All Files(*)")
+        if file_name == '':
+            return
+        logging.info(f'Open file {file_name}')
+        self.video_path = file_name
+        self.load_video()
 
-    def open_trespassing_analyzer_config_file(self):
-        file_name, file_type = QFileDialog.getOpenFileName(self,
-                                                           "Open a trespassing analyzer configuration file",
-                                                           "config",
-                                                           "*.json;;All Files(*)")
-        if file_name != '':
-            logging.info(f'Open file {file_name}')
-            analyzers = TrespassingAnalyzer.from_file(file_name)
-            self.image_processor.set_analyzers(analyzers)
+    def load_trespassing_analyzer_config(self):
+        file_name, _ = QFileDialog.getOpenFileName(self,
+                                                   "Open a trespassing analyzer configuration file",
+                                                   "config/trespassing_analyzers",
+                                                   "*.json")
+        if file_name == '':
+            return
+        logging.info(f'Open file {file_name}')
+        analyzers = TrespassingAnalyzer.from_file(file_name)
+        self.image_processor.set_analyzers(analyzers)
+
+    def load_illegal_entering_analyzer_config(self):
+        file_name, _ = QFileDialog.getOpenFileName(self,
+                                                   "Open a illegal entering analyzer configuration file",
+                                                   "config/illegal_entering_analyzers",
+                                                   "*.json")
+        if file_name == '':
+            return
+        logging.info(f'Open file {file_name}')
+        analyzers = IllegalEnteringAnalyzer.from_file(file_name)
+        self.image_processor.set_analyzers(analyzers)
 
     def load_video(self):
         self.capture = cv2.VideoCapture(self.video_path)

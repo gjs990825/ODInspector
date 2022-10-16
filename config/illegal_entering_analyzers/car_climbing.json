@@ -1,0 +1,11 @@
+[
+    {
+        "name": "Group1",
+        "inspection_targets": ["minecart"],
+        "detection_targets": ["person"],
+        "threshold": 0.7,
+        "abcd": [10, 90, 60, 100],
+        "color_inspection": [201, 255, 193],
+        "color_detection": [252, 250, 100]
+    }
+]

@@ -25,6 +25,21 @@ class ODResultAnalyzer:
     def get_drew_results(self):
         return self.drew_results
 
+    @staticmethod
+    def from_json(json_obj):
+        raise NotImplementedError
+
+    @classmethod
+    def from_file(cls, path):
+        analyzers = []
+        with open(path, 'r') as f:
+            for analyzer in json.load(f):
+                analyzers.append(cls.from_json(analyzer))
+        return analyzers
+
+    def __repr__(self):
+        return self.__str__()
+
 
 class TrespassingAnalyzer(ODResultAnalyzer):
     forbidden_areas: list[Polygon]
@@ -98,12 +113,6 @@ class TrespassingAnalyzer(ODResultAnalyzer):
             'color': self.color
         })
 
-    def __repr__(self):
-        return self.__str__()
-
-    def to_json(self):
-        return self.__str__()
-
     @staticmethod
     def from_json(json_obj):
         try:
@@ -118,14 +127,6 @@ class TrespassingAnalyzer(ODResultAnalyzer):
                                    json_obj['abcd'],
                                    json_obj['color'],
                                    ignore_below_frames)
-
-    @staticmethod
-    def from_file(path):
-        analyzers = []
-        with open(path, 'r') as f:
-            for analyzer in json.load(f):
-                analyzers.append(TrespassingAnalyzer.from_json(analyzer))
-        return analyzers
 
 
 class IllegalEnteringAnalyzer(ODResultAnalyzer):
@@ -178,4 +179,21 @@ class IllegalEnteringAnalyzer(ODResultAnalyzer):
             draw_polygon_outline(image, detection_target.get_polygon(self.abcd), thickness, self.color_detection)
         self.drew_results = self.last_results
 
-    # TODO Add configuration loading
+    @staticmethod
+    def from_json(json_obj):
+        return IllegalEnteringAnalyzer(json_obj['inspection_targets'],
+                                       json_obj['detection_targets'],
+                                       json_obj['threshold'],
+                                       json_obj['abcd'],
+                                       json_obj['color_inspection'], json_obj['color_detection'])
+
+    def __str__(self):
+        return json.dumps({
+            'inspection_targets': self.inspection_targets,
+            'detection_targets': self.detection_targets,
+            'threshold': self.threshold,
+            'abcd': self.abcd,
+            'color_inspection': self.color_inspection,
+            'color_detection': self.color_detection
+        })
+
