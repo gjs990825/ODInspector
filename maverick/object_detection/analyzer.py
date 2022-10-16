@@ -1,7 +1,9 @@
 import json
+
 import cv2
 from shapely.geometry import Polygon
 
+from maverick.object_detection import get_line_thickness
 from maverick.object_detection.api.v1 import ODResult
 from maverick.object_detection.utils.polygon import draw_polygon_outline, in_target_proportion, get_polygon_points
 
@@ -64,7 +66,7 @@ class TrespassingAnalyzer(ODResultAnalyzer):
             self.frame_counter += 1
 
     def draw_conclusion(self, image):
-        thickness = max(int(min((image.shape[1], image.shape[0])) / 150), 1)
+        thickness = get_line_thickness(image)
         self.draw_forbidden_area(image, thickness, self.color)
         if self.frame_counter < self.ignore_below_frames:
             self.drew_results = []
@@ -124,3 +126,56 @@ class TrespassingAnalyzer(ODResultAnalyzer):
             for analyzer in json.load(f):
                 analyzers.append(TrespassingAnalyzer.from_json(analyzer))
         return analyzers
+
+
+class IllegalEnteringAnalyzer(ODResultAnalyzer):
+    inspection_targets: list[str]
+    detection_targets: list[str]
+    threshold: float
+    color_inspection: tuple[int, int, int]
+    color_detection: tuple[int, int, int]
+    abcd: tuple[int, int, int, int]
+
+    def __init__(self,
+                 inspection_targets: list[str],
+                 detection_targets: list[str],
+                 threshold: float,
+                 abcd: tuple[int, int, int, int],
+                 color_inspection: tuple[int, int, int],
+                 color_detection: tuple[int, int, int]):
+        super().__init__()
+        self.inspection_targets = inspection_targets
+        self.detection_targets = detection_targets
+        self.threshold = threshold
+        self.abcd = abcd
+        self.color_detection = color_detection
+        self.color_inspection = color_inspection
+
+    def inspection_target_filter(self, results: list[ODResult]):
+        return list(filter(lambda x: x.label in self.inspection_targets, results))
+
+    def detection_target_filter(self, results: list[ODResult]):
+        return list(filter(lambda x: x.label in self.detection_targets, results))
+
+    def analyze(self, results: list[ODResult]):
+        self.last_results.clear()
+
+        for inspection_target in self.inspection_target_filter(results):
+            p2 = inspection_target.get_polygon()
+            for detection_target in self.detection_target_filter(results):
+                proportion = in_target_proportion(detection_target.get_polygon(self.abcd), p2)
+                if proportion > self.threshold:
+                    self.last_results.append(inspection_target)
+                    self.last_results.append(detection_target)
+        self.last_results = list(set(self.last_results))
+
+    def draw_conclusion(self, image):
+        thickness = get_line_thickness(image)
+        for inspection_target in self.inspection_target_filter(self.last_results):
+            draw_polygon_outline(image, inspection_target.get_polygon(), thickness, self.color_inspection)
+        for detection_target in self.detection_target_filter(self.last_results):
+            draw_polygon_outline(image, detection_target.get_polygon(), thickness, self.color_detection)
+            draw_polygon_outline(image, detection_target.get_polygon(self.abcd), thickness, self.color_detection)
+        self.drew_results = self.last_results
+
+    # TODO Add configuration loading

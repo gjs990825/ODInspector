@@ -617,6 +617,7 @@ class ODInspector(QMainWindow):
     def load_video(self):
         self.capture = cv2.VideoCapture(self.video_path)
         self.total_frame_number = int(self.capture.get(cv2.CAP_PROP_FRAME_COUNT))
+        logging.info(f'Video frame count: {self.total_frame_number}')
         self.video_fps = self.capture.get(cv2.CAP_PROP_FPS)
         if self.video_fps > 60:
             logging.error(f'Abnormal fps: {self.video_fps}, reset to default fps')
