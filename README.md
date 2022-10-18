@@ -1,15 +1,21 @@
 ODInspector
 ==========
-
 ODInspector(ODI), short for Object Detection Inspector.
-View input and output frames in parallel.
-Controllable playback speed and position.
-Server runs on local or remote machines,
-ODI can be implemented independently.
+Real time video detection results viewing for object detection models.
+
+Features
+-----
+1. View output frames only or paralleled with input frames.
+2. Seamless model switching, no need to pause.
+3. Support result analyzers such as trespassing and illegal entering.
+4. Quick switch between analyzer configurations, get instant results.
+5. Record any time you need with keystrokes(Ctrl+R / Ctrl+Shift+R).
+6. Controllable playback speed and position with arrow key shortcut support.
+7. Server and client can be implemented independently.
 
 Screenshots
 -----
-![](docs/images/Snipaste_2022-09-14_18-52-45.png)
+![](docs/images/Snipaste_2022-10-18_19-50-37.png)
 
 Requirements
 -----
@@ -21,7 +27,7 @@ Server Implementation
 -----
 
 1. Copy package 'maverick' to your OD project.
-2. Write your configurations to `model_config.json`
+2. (Optional) Write your configurations to `model_config.json`
 ```json
 [
   {
@@ -36,26 +42,49 @@ Server Implementation
   }
 ]
 ```
-3. Implement ObjectDetectionServiceInterface
+3. Implement ODServiceInterface
 ```python
-from maverick.object_detection.api.v1 import ObjectDetectionServiceInterface
+from maverick.object_detection.api.v1 import ODResult, Model, ODServiceInterface
 
-class ODService(ObjectDetectionServiceInterface):
+class ODService(ODServiceInterface):
+    yolo_loaded: dict[str, DetectMultiBackend]
+
     def __init__(self):
         super().__init__()
-        self.yolo = None
+        # optional, load model config from disk
+        self.models = Model.from_json_string(open('./model_config.json').read())
+        if len(self.models) == 0:
+            raise FileNotFoundError("Bad config")
+        self.yolo_loaded = dict()
+
+    def do_detections(self, image: numpy.ndarray) -> list[ODResult]:
+        if self.current_model is not None:
+            try:
+                return self.inference_with(self.yolo_loaded[self.current_model.name], image)
+            except KeyError:
+                logging.warning('Model might be loading...')
+                return []
+        logging.warning('No model selected')
+        return []
 
     def set_current_model(self, model_name: str):
-        super(ODService, self).set_current_model(model_name)
-        model = next(model for model in self.models if model.name == model_name)
-        # load model here
-        self.yolo = YOLO(model_path=model.weight_path, classes_path=model.class_path)
+        if self.current_model is not None and model_name == self.current_model.name:
+            logging.warning('No need to change model')
+            return
+        super().set_current_model(model_name)
 
-    def detect(self, image):
-        if self.yolo is not None:
-            # do detection here
-            return self.yolo.detect_image_for_od_results(image)
-        return []
+        if model_name in self.yolo_loaded:
+            logging.info('model already loaded')
+            return
+
+        # model loading here
+
+        # add to record
+        self.yolo_loaded[model_name] = newly_loaded_model
+
+    @staticmethod
+    def inference_with(yolo: DetectMultiBackend, img: numpy.ndarray):
+        # inference
 ```
 4. Set service and run app
 
@@ -66,3 +95,5 @@ if __name__ == '__main__':
     server.service = ODService()
     server.app.run()
 ```
+
+5. Launch ODI and enjoy.
