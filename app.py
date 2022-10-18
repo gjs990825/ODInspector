@@ -14,17 +14,17 @@ from PyQt6.QtGui import QAction, QIcon
 from PyQt6.QtWidgets import QApplication, QWidget, QPushButton, QMessageBox, QMainWindow, QMenu, QHBoxLayout, QStyle, \
     QSlider, QFileDialog, QVBoxLayout, QLabel, QSizePolicy, QComboBox, QLineEdit, QCheckBox
 
-from maverick.object_detection.analyzer import ODResultAnalyzer, TrespassingAnalyzer, IllegalEnteringAnalyzer
-from maverick.object_detection.api.v1 import ODResult, Model, ODServiceInterface
-from maverick.object_detection.image_rocessor import ImageProcessorInterface
-from maverick.object_detection.utils import clamp
+from maverick.object_detection.analyzer import TrespassingAnalyzer, IllegalEnteringAnalyzer
+from maverick.object_detection.api.v1 import ODResult, Model, ODServiceOverNetworkConfig, ODServiceInterface
+from maverick.object_detection import ImageProcessingHelper
+from maverick.object_detection.utils import clamp, create_in_memory_image
 
 logging.basicConfig(level=logging.INFO)
 
 
-class ImageProcessor(ImageProcessorInterface):
-    def __init__(self, base_url, analyzers: list[ODResultAnalyzer] = None, binary_result=False, proxies=None):
-        super().__init__(binary_result, analyzers)
+class ODServiceOverNetworkClient(ODServiceInterface):
+    def __init__(self, base_url, proxies=None):
+        super().__init__()
         self.base = base_url
         self.proxies = proxies
 
@@ -35,19 +35,20 @@ class ImageProcessor(ImageProcessorInterface):
                             'server is not running.')
 
     def update_models(self):
-        response = requests.get(self.base + ODServiceInterface.PATH_LIST_MODELS, proxies=self.proxies)
+        response = requests.get(self.base + ODServiceOverNetworkConfig.PATH_LIST_MODELS, proxies=self.proxies)
         self.models = Model.from_json(response.json())
-        self.set_current_model(self.models[0].name)
 
     def set_current_model(self, model_name):
         super().set_current_model(model_name)
-        response = requests.get(self.base + ODServiceInterface.PATH_SET_MODEL, params={'model_name': model_name},
+        response = requests.get(self.base + ODServiceOverNetworkConfig.PATH_SET_MODEL,
+                                params={'model_name': model_name},
                                 proxies=self.proxies)
         logging.debug(f'HTTP response:{response.text}')
 
-    def request_detection(self, in_memory_image):
+    def do_detections(self, image: numpy.ndarray) -> list[ODResult]:
         t_s = time.time()
-        response = requests.post(self.base + ODServiceInterface.PATH_DETECT_WITH_BINARY, data=in_memory_image,
+        in_mem_image = create_in_memory_image(image)
+        response = requests.post(self.base + ODServiceOverNetworkConfig.PATH_DETECT_WITH_BINARY, data=in_mem_image,
                                  proxies=self.proxies)
         logging.debug('Request uses %.4fs' % (time.time() - t_s))
         logging.debug(response.json())
@@ -55,51 +56,17 @@ class ImageProcessor(ImageProcessorInterface):
         logging.debug(results)
         return results
 
-    def request_detection_for_image_result(self, in_memory_image):
-        t_s = time.time()
-        response = requests.post(self.base + ODServiceInterface.PATH_DETECT_WITH_BINARY_FOR_IMAGE_RESULT,
-                                 data=in_memory_image, proxies=self.proxies)
-        logging.debug('Request for image result uses %.4fs' % (time.time() - t_s))
-        buffer = numpy.frombuffer(response.content, dtype=numpy.uint8)
-        image_result = cv2.imdecode(buffer, cv2.IMREAD_COLOR)
-        return cv2.cvtColor(image_result, cv2.COLOR_BGR2RGB)
-
     def set_base_url(self, url):
         self.base = url
 
 
-class DummyImageProcessor(ImageProcessorInterface):
-
-    def __init__(self, sleep=0.0):
-        super().__init__()
-        self.sleep = sleep
-
-    def request_detection(self, in_memory_image) -> list[ODResult]:
-        time.sleep(self.sleep)
-        return []
-
-    def request_detection_for_image_result(self, in_memory_image):
-        buffer = numpy.frombuffer(in_memory_image, dtype=numpy.uint8)
-        image_result = cv2.imdecode(buffer, cv2.IMREAD_COLOR)
-        return cv2.cvtColor(image_result, cv2.COLOR_BGR2RGB)
-
-    def update_models(self):
-        self.models = [
-            Model('Model1', 'model_path1', 'weight_path1', ['class1', 'class2']),
-            Model('Model2', 'model_path2', 'weight_path2', ['class1', 'class2', 'class3'])
-        ]
-
-    def set_base_url(self, url):
-        pass
-
-
-class ImageProcessQueue(threading.Thread):
-    def __init__(self, processor: ImageProcessorInterface, result_callback):
+class ImageProcessingQueue(threading.Thread):
+    def __init__(self, helper: ImageProcessingHelper, result_callback):
         super().__init__()
         self.exit_flag = False
         self.image_queue = queue.Queue(3)
         self.callback = result_callback
-        self.processor = processor
+        self.helper = helper
         self.queue_lock = threading.Lock()
         self.is_processing = False
 
@@ -119,7 +86,7 @@ class ImageProcessQueue(threading.Thread):
                 self.is_processing = True
                 self.queue_lock.release()
                 t_s = time.time()
-                output = self.processor.detect(image)
+                output = self.helper.detect(image)
                 logging.debug('Detection: %.4fs used' % (time.time() - t_s))
                 self.callback(output)
                 self.is_processing = False
@@ -182,9 +149,7 @@ class ODInspector(QMainWindow):
         self.window_size = 1200, 800
         self.save_path = './recordings'  # recording path
 
-        self.image_processor = ImageProcessor(self.server_url)
-        # self.image_processor = ImageProcessor(self.server_url, binary_result=True)
-        # self.image_processor = DummyImageProcessor(1/15)  # Fake image processor that processes 15 image per second
+        self.processing_helper = ImageProcessingHelper(ODServiceOverNetworkClient(self.server_url))
 
         # Some lambdas
         # Get current playback fps
@@ -302,7 +267,7 @@ class ODInspector(QMainWindow):
 
         clear_analyzer_action = QAction('Clear Analyzer', self)
         clear_analyzer_action.setShortcut('Ctrl+Shift+A')
-        clear_analyzer_action.triggered.connect(lambda: self.image_processor.set_analyzers([]))
+        clear_analyzer_action.triggered.connect(lambda: self.processing_helper.set_analyzers([]))
         analyzer_menu.addAction(clear_analyzer_action)
 
         recorder_menu = QMenu('&Recorder', self)
@@ -385,17 +350,19 @@ class ODInspector(QMainWindow):
 
     def load_model_info(self):
         self.server_url = self.server_url_input.text()
-        self.image_processor.set_base_url(self.server_url)
+        if isinstance(self.processing_helper.service, ODServiceOverNetworkClient):
+            self.processing_helper.service.set_base_url(self.server_url)
         self.model_combobox.clear()
-        for model in self.image_processor.get_models():
+        for model in self.processing_helper.service.get_models():
             self.model_combobox.addItem(f'{model.name}: {len(model.classes)}class(es)', model.name)
         self.model_combobox.currentIndexChanged.connect(
             lambda: self.change_model(self.model_combobox.currentData()))
+        self.change_model(self.processing_helper.service.get_model_names()[0])
 
     def change_model(self, model_name):
         if model_name is None:
             return
-        self.image_processor.set_current_model(model_name)
+        self.processing_helper.set_current_model(model_name)
 
     def check_frame_seeking(self):
         playback_fps = self.playback_fps()
@@ -622,7 +589,7 @@ class ODInspector(QMainWindow):
             return
         logging.info(f'Open file {file_name}')
         analyzers = TrespassingAnalyzer.from_file(file_name)
-        self.image_processor.set_analyzers(analyzers)
+        self.processing_helper.set_analyzers(analyzers)
 
     def load_illegal_entering_analyzer_config(self):
         file_name, _ = QFileDialog.getOpenFileName(self,
@@ -633,7 +600,7 @@ class ODInspector(QMainWindow):
             return
         logging.info(f'Open file {file_name}')
         analyzers = IllegalEnteringAnalyzer.from_file(file_name)
-        self.image_processor.set_analyzers(analyzers)
+        self.processing_helper.set_analyzers(analyzers)
 
     def load_video(self):
         self.capture = cv2.VideoCapture(self.video_path)
@@ -650,7 +617,7 @@ class ODInspector(QMainWindow):
         self.setWindowTitle(self.video_path)
         self.widgets_enabled(True)
         self.set_playback_speed(1.0)
-        self.image_process_queue = ImageProcessQueue(self.image_processor, self.display_output_frame)
+        self.image_process_queue = ImageProcessingQueue(self.processing_helper, self.display_output_frame)
         self.image_process_queue.start()
         self.video_resume()
 

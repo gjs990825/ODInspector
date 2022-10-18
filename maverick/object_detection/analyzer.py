@@ -3,8 +3,8 @@ import json
 import cv2
 from shapely.geometry import Polygon
 
-from maverick.object_detection import get_line_thickness
 from maverick.object_detection.api.v1 import ODResult
+from maverick.object_detection.utils import get_line_thickness
 from maverick.object_detection.utils.polygon import draw_polygon_outline, in_target_proportion, get_polygon_points
 
 

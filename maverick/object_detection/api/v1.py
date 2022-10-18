@@ -1,5 +1,9 @@
 import json
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Optional
+
+import numpy
 from shapely.geometry import Polygon
 
 
@@ -113,29 +117,33 @@ class Model:
         return Model.from_json(json.loads(j_str))
 
 
-class ODServiceInterface:
-    PATH_DETECT_WITH_BINARY = "/api/v1/detect_with_binary/"
-    PATH_DETECT_WITH_BINARY_FOR_IMAGE_RESULT = "/api/v1/detect_with_binary_for_image_result/"
-    PATH_DETECT_WITH_JSON = "/api/v1/detect_with_json/"
-    PATH_LIST_MODELS = "/api/v1/model/list"
-    PATH_SET_MODEL = "/api/v1/model/set"
+class ODServiceInterface(ABC):
+    models: list[Model]
+    current_model: Optional[Model]
 
     class NoSuchModelException(Exception):
         pass
 
     def __init__(self):
-        self.models = Model.from_json_string(open('./model_config.json').read())
-        if len(self.models) == 0:
-            raise FileNotFoundError("Bad config")
-        self.current_model = self.models[0]
+        self.models = []
+        self.current_model = None
 
-    def get_available_weights(self) -> list[Model]:
+    def get_models(self) -> list[Model]:
+        if len(self.models) == 0:
+            self.update_models()
         return self.models
 
+    def get_model_names(self):
+        return [model.name for model in self.get_models()]
+
+    @abstractmethod
+    def update_models(self) -> None:
+        pass
+
+    def get_current_classes(self) -> list[str]:
+        return self.current_model.classes
+
     def set_current_model(self, model_name: str):
-        if model_name == self.current_model.name:
-            print('No need to change model')
-            return
         if model_name not in [model.name for model in self.models]:
             raise self.NoSuchModelException()
         self.current_model = next(model for model in self.models if model.name == model_name)
@@ -143,13 +151,19 @@ class ODServiceInterface:
     def get_current_model_name(self):
         return self.current_model.name
 
-    def detect(self, image) -> list[ODResult]:
-        raise NotImplementedError
-
-    def detect_for_image_result(self, image):
-        raise NotImplementedError
+    @abstractmethod
+    def do_detections(self, image: numpy.ndarray) -> list[ODResult]:
+        pass
 
     def detect_using(self, image, weight_name: str):
         if weight_name is not None:
             self.set_current_model(weight_name)
-        return self.detect(image)
+        return self.do_detections(image)
+
+
+class ODServiceOverNetworkConfig:
+    PATH_DETECT_WITH_BINARY = "/api/v1/detect_with_binary/"
+    PATH_DETECT_WITH_BINARY_FOR_IMAGE_RESULT = "/api/v1/detect_with_binary_for_image_result/"
+    PATH_DETECT_WITH_JSON = "/api/v1/detect_with_json/"
+    PATH_LIST_MODELS = "/api/v1/model/list"
+    PATH_SET_MODEL = "/api/v1/model/set"

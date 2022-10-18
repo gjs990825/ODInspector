@@ -5,6 +5,10 @@ from PIL import Image
 from numpy import ndarray
 
 
+def get_line_thickness(image):
+    return max(int(min((image.shape[1], image.shape[0])) / 150), 1)
+
+
 def clamp(n, min_n, max_n):
     if n < min_n:
         return min_n
@@ -14,7 +18,7 @@ def clamp(n, min_n, max_n):
         return n
 
 
-def create_in_memory_image(image: ndarray):
+def create_in_memory_image(image: ndarray) -> BytesIO:
     file = BytesIO()
     image_f = Image.frombuffer('RGB', (image.shape[1], image.shape[0]), image, 'raw')
     image_f.save(file, 'bmp')  # png format seems too time-consuming, use bmp instead
@@ -23,7 +27,7 @@ def create_in_memory_image(image: ndarray):
     return file
 
 
-def create_in_memory_image_from_pil_image(image: Image):
+def create_in_memory_image_from_pil_image(image: Image) -> BytesIO:
     file = BytesIO()
     image.save(file, 'bmp')  # png format seems too time-consuming, use bmp instead
     file.name = 'test.bmp'
