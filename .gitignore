@@ -141,3 +141,4 @@ dmypy.json
 # video
 videos/
 recordings/
+image_output/

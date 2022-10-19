@@ -11,7 +11,9 @@
         ],
         "threshold": 0.5,
         "abcd": [50, 100, 0, 50],
-        "color": [0, 255, 0]
+        "color": [0, 255, 0],
+        "ignore_below_frames": 25,
+        "minimum_saving_interval": 75
     },
     {
         "name": "Group2",
@@ -25,6 +27,8 @@
         ],
         "threshold": 0.5,
         "abcd": [50, 100, 0, 50],
-        "color": [0, 0, 255]
+        "color": [0, 0, 255],
+        "ignore_below_frames": 15,
+        "minimum_saving_interval": 50
     }
 ]

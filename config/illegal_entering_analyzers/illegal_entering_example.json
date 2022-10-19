@@ -6,6 +6,8 @@
         "threshold": 0.7,
         "abcd": [10, 90, 60, 100],
         "color_inspection": [201, 255, 193],
-        "color_detection": [252, 250, 100]
+        "color_detection": [252, 250, 100],
+        "ignore_below_frames": 15,
+        "minimum_saving_interval": 50
     }
 ]
