@@ -33,11 +33,16 @@ class ImageProcessingHelper:
     def draw_result_image(self, image: numpy.ndarray, results: list[ODResult]):
         thickness = max(int(min((image.shape[1], image.shape[0])) / 150), 1)
         for result in results:
-            label = '{} {:.2f}'.format(result.label, float(result.confidence))
+            label = result.label
+            confidence = float(result.confidence)
+            if result.object_uuid is None:
+                text = '{} {:.2f}'.format(label, confidence)
+            else:
+                text = '{}({}) {:.2f}'.format(label, str(result.object_uuid)[:5], confidence)
             color = self.get_class_color(result.label)
             p1, p2 = result.get_anchor2()
             cv2.rectangle(image, p1, p2, color, thickness)
-            cv2.putText(image, label, (result.points[0], result.points[1] - thickness), cv2.FONT_HERSHEY_COMPLEX, 1,
+            cv2.putText(image, text, (result.points[0], result.points[1] - thickness), cv2.FONT_HERSHEY_COMPLEX, 1,
                         color, 2)
 
     def set_current_model(self, model_name: str):

@@ -1,7 +1,10 @@
+from __future__ import annotations
+
 import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Optional
+from uuid import UUID
 
 import numpy
 from shapely.geometry import Polygon
@@ -13,12 +16,14 @@ class ODResult:
     label: str
     points: list[int]
     type: str
+    object_uuid: Optional[UUID]
 
-    def __init__(self, confidence: str, label: str, points: list[int], type: str):
+    def __init__(self, confidence: str, label: str, points: list[int], type: str, uuid: UUID = None):
         self.confidence = confidence
         self.label = label
         self.points = points
         self.type = type
+        self.object_uuid = uuid
 
     @staticmethod
     def from_json_string(json_string):
@@ -72,10 +77,21 @@ class ODResult:
                (self.points[2], self.points[3]), \
                (self.points[2], self.points[1])
 
-    def __eq__(self, o: object) -> bool:
-        if not isinstance(o, ODResult):
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, ODResult):
             return False
-        return self.points == o.points and self.label == o.label and self.type == o.type and self.confidence == o.confidence
+        if self.object_uuid is None or other.object_uuid is None:
+            return False
+        return self.points == other.points \
+               and self.label == other.label \
+               and self.type == other.type \
+               and self.confidence == other.confidence \
+               and self.object_uuid == other.object_uuid
+
+    def is_same_object(self, other: ODResult):
+        if self.object_uuid is None or other.object_uuid is None:
+            return False
+        return self.object_uuid == other.object_uuid
 
     def __hash__(self):
         return hash(str(self))
