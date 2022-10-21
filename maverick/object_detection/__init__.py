@@ -35,10 +35,10 @@ class ImageProcessingHelper:
         for result in results:
             label = result.label
             confidence = float(result.confidence)
-            if result.object_uuid is None:
+            if result.object_id is None:
                 text = '{} {:.2f}'.format(label, confidence)
             else:
-                text = '{}({}) {:.2f}'.format(label, str(result.object_uuid)[:5], confidence)
+                text = '{}({}) {:.2f}'.format(label, str(result.object_id)[:5], confidence)
             color = self.get_class_color(result.label)
             p1, p2 = result.get_anchor2()
             cv2.rectangle(image, p1, p2, color, thickness)

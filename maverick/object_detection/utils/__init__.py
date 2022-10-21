@@ -1,12 +1,32 @@
 import colorsys
+import os
+import re
 from io import BytesIO
 
+import numpy
 from PIL import Image
 from numpy import ndarray
 
 
+def camel_to_snake(name):
+    return re.sub(r'(?<!^)(?=[A-Z])', '_', name).lower()
+
+
 def get_line_thickness(image):
     return max(int(min((image.shape[1], image.shape[0])) / 150), 1)
+
+
+def save_numpy_image(image: numpy.ndarray, path, name):
+    Image.fromarray(image, 'RGB').save(os.path.join(path, name + '.jpg'))
+
+
+def xyxy_to_xywh(boxes_xyxy):
+    boxes_xywh = list([0., 0., 0., 0.])
+    boxes_xywh[0] = (boxes_xyxy[0] + boxes_xyxy[2]) / 2.
+    boxes_xywh[1] = (boxes_xyxy[1] + boxes_xyxy[3]) / 2.
+    boxes_xywh[2] = boxes_xyxy[2] - boxes_xyxy[0]
+    boxes_xywh[3] = boxes_xyxy[3] - boxes_xyxy[1]
+    return boxes_xywh
 
 
 def clamp(n, min_n, max_n):

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import logging
 import os.path
@@ -10,8 +12,10 @@ import numpy
 from PIL import Image
 from shapely.geometry import Polygon
 
+from deep_sort import build_tracker
+from deep_sort.utils.parser import get_config
 from maverick.object_detection.api.v1 import ODResult
-from maverick.object_detection.utils import get_line_thickness
+from maverick.object_detection.utils import get_line_thickness, xyxy_to_xywh
 from maverick.object_detection.utils.polygon import draw_polygon_outline, in_target_proportion, get_polygon_points
 
 
@@ -20,8 +24,8 @@ class ODResultAnalyzer(ABC):
         self.frame_counter = 0
         self.saving_frame_passed = 0
         self.ignore_below_frames = ignore_below_frames
-        self.last_results = []
-        self.drew_results = []
+        self.last_results: list[ODResult] = []
+        self.drew_results: list[ODResult] = []
         self.current_image: Optional[numpy.ndarray] = None
         self.minium_saving_interval = minium_saving_interval
         self.saving_path = saving_path
@@ -78,7 +82,7 @@ class ODResultAnalyzer(ABC):
         Image.fromarray(image, 'RGB').save(image_path)
 
     @staticmethod
-    def from_json(json_obj):
+    def from_json(json_obj) -> ODResultAnalyzer:
         raise NotImplementedError
 
     @classmethod
@@ -258,3 +262,61 @@ class IllegalEnteringAnalyzer(ODResultAnalyzer):
             'ignore_below_frames': self.ignore_below_frames,
             'minium_saving_interval': self.minium_saving_interval
         })
+
+
+class DeepSortPedestrianAnalyzer(ODResultAnalyzer):
+    def __init__(self, color: tuple[int, int, int]):
+        super().__init__(0, -1)
+        cfg = get_config(config_file="deep_sort/configs/deep_sort.yaml")
+        cfg.USE_FASTREID = False
+        self.tracker = build_tracker(cfg, use_cuda=True)
+        self.size = 1280, 720
+        self.outputs = None
+        self.person_results: list[ODResult] = []
+        self.max_person_id = 0
+        self.color = color
+
+    def do_analyzing(self, results: list[ODResult]):
+        person_results = list(filter(lambda x: x.label == 'person', results))
+        self.person_results = person_results
+
+        bbox_xywh = numpy.ndarray((0, 4), dtype=float)
+        confidences = []
+
+        for item in person_results:
+            xywh = xyxy_to_xywh(item.get_xyxy())
+            bbox_xywh = numpy.append(bbox_xywh, numpy.array(xywh, dtype=float).reshape(1, 4), axis=0)
+            confidences.append(float(item.confidence))
+
+        outputs = self.tracker.update(bbox_xywh, confidences, self.current_image)
+
+        # draw boxes for visualization
+        if len(outputs) == 0:
+            return
+
+        bbox_xyxy = outputs[:, :4]
+        identities = outputs[:, -1]
+        logging.debug(f'xyxy: {bbox_xyxy}, id: {identities}')
+
+        for xyxy, identity, confidence in zip(bbox_xyxy, identities, confidences):
+            identity = int(identity)
+            self.max_person_id = max(self.max_person_id, identity)
+            od_result = ODResult(str(confidence), 'person', xyxy, 'rectangle', identity)
+            self.last_results.append(od_result)
+
+    def overlay_conclusion(self, image):
+        cv2.putText(image, f'Pedestrian Count: {self.max_person_id}',
+                    (50, 50), cv2.FONT_HERSHEY_COMPLEX, 1, self.color, 2)
+
+        for result in self.last_results:
+            text = 'PERSON-{} {:.2f}'.format(result.object_id, float(result.confidence))
+            thickness = get_line_thickness(image)
+            p1, p2 = result.get_anchor2()
+            cv2.rectangle(image, p1, p2, self.color, thickness)
+            cv2.putText(image, text, (result.points[0], result.points[1] - thickness), cv2.FONT_HERSHEY_COMPLEX, 1,
+                        self.color, 2)
+        self.drew_results = self.person_results
+
+    @staticmethod
+    def from_json(json_obj):
+        return DeepSortPedestrianAnalyzer(json_obj['color'])

@@ -16,14 +16,14 @@ class ODResult:
     label: str
     points: list[int]
     type: str
-    object_uuid: Optional[UUID]
+    object_id: Optional[int]
 
-    def __init__(self, confidence: str, label: str, points: list[int], type: str, uuid: UUID = None):
+    def __init__(self, confidence: str, label: str, points: list[int], type: str, object_id: int = None):
         self.confidence = confidence
         self.label = label
         self.points = points
         self.type = type
-        self.object_uuid = uuid
+        self.object_id = object_id
 
     @staticmethod
     def from_json_string(json_string):
@@ -69,6 +69,9 @@ class ODResult:
             raise TypeError('Only rectangle can have 2 point anchor')
         return (self.points[0], self.points[1]), (self.points[2], self.points[3])
 
+    def get_xyxy(self):
+        return self.points
+
     def get_anchor4(self):
         if self.type != 'rectangle':
             raise TypeError('Only rectangle can have 4 point anchor')
@@ -80,18 +83,18 @@ class ODResult:
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, ODResult):
             return False
-        if self.object_uuid is None or other.object_uuid is None:
+        if self.object_id is None or other.object_id is None:
             return False
         return self.points == other.points \
                and self.label == other.label \
                and self.type == other.type \
                and self.confidence == other.confidence \
-               and self.object_uuid == other.object_uuid
+               and self.object_id == other.object_id
 
     def is_same_object(self, other: ODResult):
-        if self.object_uuid is None or other.object_uuid is None:
+        if self.object_id is None or other.object_id is None:
             return False
-        return self.object_uuid == other.object_uuid
+        return self.object_id == other.object_id
 
     def __hash__(self):
         return hash(str(self))
