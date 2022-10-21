@@ -575,7 +575,7 @@ class ODInspector(QMainWindow):
 
     def load_analyzer(self, analyzer_cls):
         analyzer_name = analyzer_cls.__name__
-        path = os.path.join('config/', camel_to_snake(analyzer_name) + 's')
+        path = os.path.join('configs/', camel_to_snake(analyzer_name) + 's')
         file_name, _ = QFileDialog.getOpenFileName(self, f'Open a {analyzer_name} configuration file', path, '*.json')
         if file_name == '':
             return

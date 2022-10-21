@@ -20,7 +20,9 @@ from maverick.object_detection.utils.polygon import draw_polygon_outline, in_tar
 
 
 class ODResultAnalyzer(ABC):
-    def __init__(self, ignore_below_frames: int, minium_saving_interval, saving_path='./image_output'):
+    def __init__(self, ignore_below_frames: int, minium_saving_interval: int,
+                 confidence_filter: Optional[dict[str, float]],
+                 saving_path='./image_output'):
         self.frame_counter = 0
         self.saving_frame_passed = 0
         self.ignore_below_frames = ignore_below_frames
@@ -29,8 +31,24 @@ class ODResultAnalyzer(ABC):
         self.current_image: Optional[numpy.ndarray] = None
         self.minium_saving_interval = minium_saving_interval
         self.saving_path = saving_path
+        self.confidence_filter = confidence_filter
+
+    def filter(self, results: list[ODResult]) -> list[ODResult]:
+        if self.confidence_filter is None:
+            return results
+        after = []
+        for result in results:
+            if result.label not in self.confidence_filter:
+                continue
+            if float(result.confidence) >= self.confidence_filter[result.label]:
+                after.append(result)
+            else:
+                logging.info(f'Result: {result} has been ditched')
+        return after
 
     def analyze(self, results: list[ODResult], image: numpy.ndarray):
+        results = self.filter(results)
+
         self.current_image = image
         self.last_results.clear()
         self.do_analyzing(results)
@@ -43,11 +61,12 @@ class ODResultAnalyzer(ABC):
             self.saving_frame_passed += 1
 
         # check saving options
-        if self.minium_saving_interval < 0:
-            return
-        if not self.in_ignoring_range() and self.saving_frame_passed > self.minium_saving_interval:
-            self.save()
-            self.saving_frame_passed = 0
+        if self.minium_saving_interval > 0:
+            if not self.in_ignoring_range() and self.saving_frame_passed > self.minium_saving_interval:
+                self.save()
+                self.saving_frame_passed = 0
+
+        return results
 
     @abstractmethod
     def do_analyzing(self, results: list[ODResult]):
@@ -81,9 +100,9 @@ class ODResultAnalyzer(ABC):
         logging.info(f'saving to {image_path}')
         Image.fromarray(image, 'RGB').save(image_path)
 
-    @staticmethod
-    def from_json(json_obj) -> ODResultAnalyzer:
-        raise NotImplementedError
+    @classmethod
+    def from_json(cls, json_obj) -> ODResultAnalyzer:
+        return cls(**json_obj)
 
     @classmethod
     def from_file(cls, path):
@@ -105,20 +124,23 @@ class TrespassingAnalyzer(ODResultAnalyzer):
     color: tuple[int, int, int]
 
     def __init__(self,
-                 forbidden_areas: list[Polygon],
+                 forbidden_areas: list[list[int]],
                  detection_targets: list[str],
                  threshold: float,
                  abcd: tuple[int, int, int, int],
                  color: tuple[int, int, int],
                  ignore_below_frames: int = 0,
-                 minium_saving_interval: int = -1):
-        super().__init__(ignore_below_frames, minium_saving_interval)
+                 minimum_saving_interval: int = -1,
+                 confidence_filter: dict[str, float] = None,
+                 **kwargs):
+        super().__init__(ignore_below_frames, minimum_saving_interval, confidence_filter)
         self.color = color
         self.threshold = threshold
         self.detection_targets = detection_targets
-        self.forbidden_areas = forbidden_areas
+        self.forbidden_areas = [Polygon(points) for points in forbidden_areas]
         self.abcd = abcd
         self.frame_counter = 0
+        logging.warning(f'kwargs: {kwargs}')
 
     def do_analyzing(self, results: list[ODResult]):
         for result in results:
@@ -163,24 +185,6 @@ class TrespassingAnalyzer(ODResultAnalyzer):
             'minium_saving_interval': self.minium_saving_interval
         })
 
-    @staticmethod
-    def from_json(json_obj):
-        try:
-            ignore_below_frames = json_obj['ignore_below_frames']
-            minimum_saving_interval = json_obj['minimum_saving_interval']
-        except KeyError as e:
-            ignore_below_frames = 0
-            minimum_saving_interval = -1
-
-        forbidden_areas = [Polygon(points) for points in json_obj['forbidden_areas']]
-        return TrespassingAnalyzer(forbidden_areas,
-                                   json_obj['detection_targets'],
-                                   json_obj['threshold'],
-                                   json_obj['abcd'],
-                                   json_obj['color'],
-                                   ignore_below_frames,
-                                   minimum_saving_interval)
-
 
 class IllegalEnteringAnalyzer(ODResultAnalyzer):
     inspection_targets: list[str]
@@ -198,14 +202,17 @@ class IllegalEnteringAnalyzer(ODResultAnalyzer):
                  color_inspection: tuple[int, int, int],
                  color_detection: tuple[int, int, int],
                  ignore_below_frames: int = 0,
-                 minium_saving_interval: int = -1):
-        super().__init__(ignore_below_frames, minium_saving_interval)
+                 minimum_saving_interval: int = -1,
+                 confidence_filter: dict[str, float] = None,
+                 **kwargs):
+        super().__init__(ignore_below_frames, minimum_saving_interval, confidence_filter)
         self.inspection_targets = inspection_targets
         self.detection_targets = detection_targets
         self.threshold = threshold
         self.abcd = abcd
         self.color_detection = color_detection
         self.color_inspection = color_inspection
+        logging.warning(f'kwargs: {kwargs}')
 
     def inspection_target_filter(self, results: list[ODResult]):
         return list(filter(lambda x: x.label in self.inspection_targets, results))
@@ -234,23 +241,6 @@ class IllegalEnteringAnalyzer(ODResultAnalyzer):
             draw_polygon_outline(image, detection_target.get_polygon(self.abcd), thickness, self.color_detection)
         self.drew_results = self.last_results
 
-    @staticmethod
-    def from_json(json_obj):
-        try:
-            ignore_below_frames = json_obj['ignore_below_frames']
-            minimum_saving_interval = json_obj['minimum_saving_interval']
-        except KeyError:
-            ignore_below_frames = 0
-            minimum_saving_interval = -1
-        return IllegalEnteringAnalyzer(json_obj['inspection_targets'],
-                                       json_obj['detection_targets'],
-                                       json_obj['threshold'],
-                                       json_obj['abcd'],
-                                       json_obj['color_inspection'],
-                                       json_obj['color_detection'],
-                                       ignore_below_frames,
-                                       minimum_saving_interval)
-
     def __str__(self):
         return json.dumps({
             'inspection_targets': self.inspection_targets,
@@ -266,7 +256,7 @@ class IllegalEnteringAnalyzer(ODResultAnalyzer):
 
 class DeepSortPedestrianAnalyzer(ODResultAnalyzer):
     def __init__(self, color: tuple[int, int, int]):
-        super().__init__(0, -1)
+        super().__init__(0, -1, None)
         cfg = get_config(config_file="deep_sort/configs/deep_sort.yaml")
         cfg.USE_FASTREID = False
         self.tracker = build_tracker(cfg, use_cuda=True)
@@ -316,7 +306,3 @@ class DeepSortPedestrianAnalyzer(ODResultAnalyzer):
             cv2.putText(image, text, (result.points[0], result.points[1] - thickness), cv2.FONT_HERSHEY_COMPLEX, 1,
                         self.color, 2)
         self.drew_results = self.person_results
-
-    @staticmethod
-    def from_json(json_obj):
-        return DeepSortPedestrianAnalyzer(json_obj['color'])

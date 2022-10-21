@@ -22,7 +22,7 @@ class ImageProcessingHelper:
         results = self.service.do_detections(image)
         drew_results = []
         for analyzer in self.analyzers:
-            analyzer.analyze(results, image)
+            results = analyzer.analyze(results, image)
             analyzer.overlay_conclusion(cp)
             drew_results.extend(analyzer.get_drew_results())
         for drew_result in set(drew_results):
