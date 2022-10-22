@@ -14,7 +14,8 @@ from PyQt6.QtGui import QAction, QIcon
 from PyQt6.QtWidgets import QApplication, QWidget, QPushButton, QMessageBox, QMainWindow, QMenu, QHBoxLayout, QStyle, \
     QSlider, QFileDialog, QVBoxLayout, QLabel, QSizePolicy, QComboBox, QLineEdit, QCheckBox
 
-from maverick.object_detection.analyzer import TrespassingAnalyzer, IllegalEnteringAnalyzer, DeepSortPedestrianAnalyzer
+from maverick.object_detection.analyzer import TrespassingAnalyzer, IllegalEnteringAnalyzer, DeepSortPedestrianAnalyzer, \
+    ObjectMissingAnalyzer
 from maverick.object_detection.api.v1 import ODResult, Model, ODServiceOverNetworkConfig, ODServiceInterface
 from maverick.object_detection import ImageProcessingHelper
 from maverick.object_detection.utils import clamp, create_in_memory_image, camel_to_snake
@@ -266,6 +267,7 @@ class ODInspector(QMainWindow):
         analyzer_menu.addAction(create_analyzer_action(TrespassingAnalyzer, 'Ctrl+T'))
         analyzer_menu.addAction(create_analyzer_action(IllegalEnteringAnalyzer, 'Ctrl+I'))
         analyzer_menu.addAction(create_analyzer_action(DeepSortPedestrianAnalyzer, 'Ctrl+D'))
+        analyzer_menu.addAction(create_analyzer_action(ObjectMissingAnalyzer))
 
         clear_analyzer_action = QAction('Clear Analyzer', self)
         clear_analyzer_action.setShortcut('Ctrl+Shift+A')

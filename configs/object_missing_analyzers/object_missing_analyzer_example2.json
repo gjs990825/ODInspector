@@ -1,0 +1,19 @@
+[
+    {
+        "name": "Group1",
+        "inspection_areas": [
+            [[400, 100], [2200, 100], [2100, 1000], [400, 1000]]
+        ],
+        "detection_targets": ["glove", "helmet"],
+        "threshold": 0.5,
+        "abcd": [0, 100, 0, 100],
+        "color_inspection": [255, 255, 255],
+        "ignore_below_frames": 15,
+        "minimum_saving_interval": 25,
+        "confidence_filter": {
+            "glove": 0.6,
+            "helmet": 0.6,
+            "person": 0.6
+        }
+    }
+]

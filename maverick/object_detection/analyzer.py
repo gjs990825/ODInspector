@@ -5,7 +5,7 @@ import logging
 import os.path
 import time
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Optional, Union
 
 import cv2
 import numpy
@@ -308,6 +308,10 @@ class ObjectMissingAnalyzer(ODResultAnalyzer):
                  prompt: str = 'Warning: {detection_target} not in {inspection_target}',
                  **kwargs):
         super().__init__(ignore_below_frames, minimum_saving_interval, confidence_filter)
+        if 'inspection_targets' not in kwargs and 'inspection_areas' not in kwargs:
+            raise KeyError(r"one of 'inspection_targets' and 'inspection_areas' needed")
+        if 'inspection_targets' in kwargs and 'inspection_areas' in kwargs:
+            raise KeyError(r"only one of 'inspection_targets' and 'inspection_areas' is needed")
 
         if 'inspection_targets' in kwargs:
             self.inspection_targets = kwargs['inspection_targets']
@@ -319,7 +323,7 @@ class ObjectMissingAnalyzer(ODResultAnalyzer):
         self.abcd = abcd
         self.color_inspection = color_inspection
         self.prompt = prompt
-        self.mapping: dict[ODResult, list[str]] = dict()
+        self.mapping: dict[Union[ODResult, int], list[str]] = dict()
         logging.warning(f'kwargs: {kwargs}')
 
     def inspection_target_filter(self, results: list[ODResult]):
@@ -328,44 +332,58 @@ class ObjectMissingAnalyzer(ODResultAnalyzer):
     def detection_target_filter(self, results: list[ODResult]):
         return list(filter(lambda x: x.label in self.detection_targets, results))
 
-    def do_analyzing(self, results: list[ODResult]):
-        # inspection_targets = []
-        # if self.inspection_targets is None:
-        #     for inspection_areas in self.inspection_areas:
-        #         inspection_targets.append(
-        #             ODResult('1', 'AREA', get_polygon_points(inspection_areas), 'rectangle')
-        #         )
-        # else:
-        #     inspection_targets = self.inspection_target_filter(results)
+    def get_area_id(self, area: Polygon):
+        return self.inspection_areas.index(area)
 
-        for inspection_target in self.inspection_target_filter(results):
+    def do_analyzing(self, results: list[ODResult]):
+        self.mapping.clear()
+        if self.inspection_targets is None:
+            inspection_objects = self.inspection_areas
+        else:
+            inspection_objects = self.inspection_target_filter(results)
+
+        for inspection_target in inspection_objects:
             objs = []
-            p2 = inspection_target.get_polygon()
+            p2 = inspection_target.get_polygon() if isinstance(inspection_target, ODResult) else inspection_target
             for detection_target in self.detection_target_filter(results):
                 proportion = in_target_proportion(detection_target.get_polygon(self.abcd), p2)
                 if proportion > self.threshold:
                     objs.append(detection_target.label)
 
             for detection_target in self.detection_targets:
-                if detection_target not in objs:
+                if detection_target in objs:
+                    continue
+
+                if isinstance(inspection_target, ODResult):
                     self.last_results.append(inspection_target)
-                    if inspection_target not in self.mapping:
-                        self.mapping[inspection_target] = [detection_target]
-                    else:
-                        self.mapping[inspection_target].append(detection_target)
+                    key = inspection_target
+                else:
+                    # is there a better solution? :\
+                    self.last_results.append(ODResult('1.0', 'dummy', [0, 0, 100, 100], 'rectangle'))
+                    key = self.get_area_id(inspection_target)
+
+                if key not in self.mapping:
+                    self.mapping[key] = [detection_target]
+                else:
+                    self.mapping[key].append(detection_target)
 
     def overlay_conclusion(self, image):
+        thickness = get_line_thickness(image)
+        if self.inspection_targets is None:
+            for area in self.inspection_areas:
+                draw_polygon_outline(image, area, thickness, self.color_inspection)
         if self.in_ignoring_range():
             self.last_results = []
             return
-        thickness = get_line_thickness(image)
 
-        # if self.inspection_targets is None:
-        #     for area in self.inspection_areas:
-        #         draw_polygon_outline(area)
-        #     # cv2.putText(image, f'{self.last_results} missing',(50, 50),
-        #     #             cv2.FONT_HERSHEY_COMPLEX, 1, self.color_inspection, 2)
-        #     return
+        if self.inspection_targets is None:
+            for area in self.inspection_areas:
+                area_id = self.get_area_id(area)
+                if area_id in self.mapping:
+                    x, y = get_polygon_points(area)[0]
+                    cv2.putText(image, f'{self.mapping[area_id]} missing', (x + 50, y + 50),
+                                cv2.FONT_HERSHEY_COMPLEX, 1, self.color_inspection, 2)
+            return
 
         for result in self.last_results:
             draw_polygon_outline(image, result.get_polygon(), thickness, self.color_inspection)
