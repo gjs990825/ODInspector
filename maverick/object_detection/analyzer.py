@@ -20,7 +20,7 @@ from maverick.object_detection.utils.polygon import draw_polygon_outline, in_tar
 
 
 class ODResultAnalyzer(ABC):
-    def __init__(self, ignore_below_frames: int, minium_saving_interval: int,
+    def __init__(self, ignore_below_frames: int, minimum_saving_interval: int,
                  confidence_filter: Optional[dict[str, float]],
                  saving_path='./image_output'):
         self.frame_counter = 0
@@ -29,7 +29,7 @@ class ODResultAnalyzer(ABC):
         self.last_results: list[ODResult] = []
         self.drew_results: list[ODResult] = []
         self.current_image: Optional[numpy.ndarray] = None
-        self.minium_saving_interval = minium_saving_interval
+        self.minimum_saving_interval = minimum_saving_interval
         self.saving_path = saving_path
         self.confidence_filter = confidence_filter
 
@@ -51,6 +51,7 @@ class ODResultAnalyzer(ABC):
 
         self.current_image = image
         self.last_results.clear()
+        self.drew_results.clear()
         self.do_analyzing(results)
         self.last_results = list(set(self.last_results))
 
@@ -61,8 +62,8 @@ class ODResultAnalyzer(ABC):
             self.saving_frame_passed += 1
 
         # check saving options
-        if self.minium_saving_interval > 0:
-            if not self.in_ignoring_range() and self.saving_frame_passed > self.minium_saving_interval:
+        if self.minimum_saving_interval > 0:
+            if not self.in_ignoring_range() and self.saving_frame_passed > self.minimum_saving_interval:
                 self.save()
                 self.saving_frame_passed = 0
 
@@ -111,9 +112,6 @@ class ODResultAnalyzer(ABC):
             for analyzer in json.load(f):
                 analyzers.append(cls.from_json(analyzer))
         return analyzers
-
-    def __repr__(self):
-        return self.__str__()
 
 
 class TrespassingAnalyzer(ODResultAnalyzer):
@@ -168,20 +166,6 @@ class TrespassingAnalyzer(ODResultAnalyzer):
             prompt = self.prompt.replace('{detection_target}', result.label)
             cv2.putText(image, prompt, (result.points[0], result.points[1] - thickness), cv2.FONT_HERSHEY_COMPLEX, 1,
                         self.color, 2)
-
-    def __str__(self):
-        areas = []
-        for p in self.forbidden_areas:
-            areas.append(get_polygon_points(p))
-        return json.dumps({
-            'forbidden_areas': areas,
-            'detection_targets': self.detection_targets,
-            'threshold': self.threshold,
-            'abcd': self.abcd,
-            'color': self.color,
-            'ignore_below_frames': self.ignore_below_frames,
-            'minium_saving_interval': self.minium_saving_interval
-        })
 
 
 class IllegalEnteringAnalyzer(ODResultAnalyzer):
@@ -251,21 +235,11 @@ class IllegalEnteringAnalyzer(ODResultAnalyzer):
 
         self.drew_results = self.last_results
 
-    def __str__(self):
-        return json.dumps({
-            'inspection_targets': self.inspection_targets,
-            'detection_targets': self.detection_targets,
-            'threshold': self.threshold,
-            'abcd': self.abcd,
-            'color_inspection': self.color_inspection,
-            'color_detection': self.color_detection,
-            'ignore_below_frames': self.ignore_below_frames,
-            'minium_saving_interval': self.minium_saving_interval
-        })
-
 
 class DeepSortPedestrianAnalyzer(ODResultAnalyzer):
-    def __init__(self, color: tuple[int, int, int]):
+    def __init__(self,
+                 color: tuple[int, int, int],
+                 **kwargs):
         super().__init__(0, -1, None)
         cfg = get_config(config_file="deep_sort/configs/deep_sort.yaml")
         cfg.USE_FASTREID = False
@@ -275,6 +249,7 @@ class DeepSortPedestrianAnalyzer(ODResultAnalyzer):
         self.person_results: list[ODResult] = []
         self.max_person_id = 0
         self.color = color
+        logging.warning(f'kwargs: {kwargs}')
 
     def do_analyzing(self, results: list[ODResult]):
         person_results = list(filter(lambda x: x.label == 'person', results))
@@ -316,3 +291,87 @@ class DeepSortPedestrianAnalyzer(ODResultAnalyzer):
             cv2.putText(image, text, (result.points[0], result.points[1] - thickness), cv2.FONT_HERSHEY_COMPLEX, 1,
                         self.color, 2)
         self.drew_results = self.person_results
+
+
+class ObjectMissingAnalyzer(ODResultAnalyzer):
+    inspection_targets: Optional[list[str]] = None
+    inspection_areas: Optional[list[Polygon]] = None
+
+    def __init__(self,
+                 detection_targets: list[str],
+                 threshold: float,
+                 abcd: tuple[int, int, int, int],
+                 color_inspection: tuple[int, int, int],
+                 ignore_below_frames: int = 0,
+                 minimum_saving_interval: int = -1,
+                 confidence_filter: dict[str, float] = None,
+                 prompt: str = 'Warning: {detection_target} not in {inspection_target}',
+                 **kwargs):
+        super().__init__(ignore_below_frames, minimum_saving_interval, confidence_filter)
+
+        if 'inspection_targets' in kwargs:
+            self.inspection_targets = kwargs['inspection_targets']
+        if 'inspection_areas' in kwargs:
+            self.inspection_areas = [Polygon(points) for points in kwargs['inspection_areas']]
+
+        self.detection_targets = detection_targets
+        self.threshold = threshold
+        self.abcd = abcd
+        self.color_inspection = color_inspection
+        self.prompt = prompt
+        self.mapping: dict[ODResult, list[str]] = dict()
+        logging.warning(f'kwargs: {kwargs}')
+
+    def inspection_target_filter(self, results: list[ODResult]):
+        return list(filter(lambda x: x.label in self.inspection_targets, results))
+
+    def detection_target_filter(self, results: list[ODResult]):
+        return list(filter(lambda x: x.label in self.detection_targets, results))
+
+    def do_analyzing(self, results: list[ODResult]):
+        # inspection_targets = []
+        # if self.inspection_targets is None:
+        #     for inspection_areas in self.inspection_areas:
+        #         inspection_targets.append(
+        #             ODResult('1', 'AREA', get_polygon_points(inspection_areas), 'rectangle')
+        #         )
+        # else:
+        #     inspection_targets = self.inspection_target_filter(results)
+
+        for inspection_target in self.inspection_target_filter(results):
+            objs = []
+            p2 = inspection_target.get_polygon()
+            for detection_target in self.detection_target_filter(results):
+                proportion = in_target_proportion(detection_target.get_polygon(self.abcd), p2)
+                if proportion > self.threshold:
+                    objs.append(detection_target.label)
+
+            for detection_target in self.detection_targets:
+                if detection_target not in objs:
+                    self.last_results.append(inspection_target)
+                    if inspection_target not in self.mapping:
+                        self.mapping[inspection_target] = [detection_target]
+                    else:
+                        self.mapping[inspection_target].append(detection_target)
+
+    def overlay_conclusion(self, image):
+        if self.in_ignoring_range():
+            self.last_results = []
+            return
+        thickness = get_line_thickness(image)
+
+        # if self.inspection_targets is None:
+        #     for area in self.inspection_areas:
+        #         draw_polygon_outline(area)
+        #     # cv2.putText(image, f'{self.last_results} missing',(50, 50),
+        #     #             cv2.FONT_HERSHEY_COMPLEX, 1, self.color_inspection, 2)
+        #     return
+
+        for result in self.last_results:
+            draw_polygon_outline(image, result.get_polygon(), thickness, self.color_inspection)
+
+            cv2.putText(image, f'{self.mapping[result]} missing',
+                        (result.points[0], result.points[1] - thickness),
+                        cv2.FONT_HERSHEY_COMPLEX, 1, self.color_inspection, 2)
+
+        self.drew_results = self.last_results
