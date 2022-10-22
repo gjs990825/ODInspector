@@ -12,6 +12,7 @@
         "confidence_filter": {
             "minecart": 0.7,
             "person": 0.7
-        }
+        },
+        "prompt": "Warning: {detection_target} in {inspection_target}"
     }
 ]

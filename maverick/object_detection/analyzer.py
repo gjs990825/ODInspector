@@ -132,6 +132,7 @@ class TrespassingAnalyzer(ODResultAnalyzer):
                  ignore_below_frames: int = 0,
                  minimum_saving_interval: int = -1,
                  confidence_filter: dict[str, float] = None,
+                 prompt: str = 'Trespassing: {detection_target}',
                  **kwargs):
         super().__init__(ignore_below_frames, minimum_saving_interval, confidence_filter)
         self.color = color
@@ -140,6 +141,7 @@ class TrespassingAnalyzer(ODResultAnalyzer):
         self.forbidden_areas = [Polygon(points) for points in forbidden_areas]
         self.abcd = abcd
         self.frame_counter = 0
+        self.prompt = prompt
         logging.warning(f'kwargs: {kwargs}')
 
     def do_analyzing(self, results: list[ODResult]):
@@ -153,23 +155,19 @@ class TrespassingAnalyzer(ODResultAnalyzer):
 
     def overlay_conclusion(self, image):
         thickness = get_line_thickness(image)
-        self.draw_forbidden_area(image, thickness, self.color)
+        for forbidden_area in self.forbidden_areas:
+            draw_polygon_outline(image, forbidden_area, thickness, self.color)
         if self.in_ignoring_range():
             self.drew_results = []
             return
 
         self.drew_results = self.last_results
         for result in self.last_results:
-            label = f'{result.label} trespassing'
-            p1, p2 = result.get_anchor2()
-            cv2.rectangle(image, p1, p2, self.color, thickness)
-            cv2.putText(image, label, (result.points[0], result.points[1] - thickness), cv2.FONT_HERSHEY_COMPLEX, 1,
-                        self.color, 2)
+            draw_polygon_outline(image, result.get_polygon(), thickness, self.color)
             draw_polygon_outline(image, result.get_polygon(self.abcd), thickness, self.color)
-
-    def draw_forbidden_area(self, image, thickness, color):
-        for forbidden_area in self.forbidden_areas:
-            draw_polygon_outline(image, forbidden_area, thickness, color)
+            prompt = self.prompt.replace('{detection_target}', result.label)
+            cv2.putText(image, prompt, (result.points[0], result.points[1] - thickness), cv2.FONT_HERSHEY_COMPLEX, 1,
+                        self.color, 2)
 
     def __str__(self):
         areas = []
@@ -204,6 +202,7 @@ class IllegalEnteringAnalyzer(ODResultAnalyzer):
                  ignore_below_frames: int = 0,
                  minimum_saving_interval: int = -1,
                  confidence_filter: dict[str, float] = None,
+                 prompt: str = 'Warning: {detection_target} in {inspection_target}',
                  **kwargs):
         super().__init__(ignore_below_frames, minimum_saving_interval, confidence_filter)
         self.inspection_targets = inspection_targets
@@ -212,6 +211,8 @@ class IllegalEnteringAnalyzer(ODResultAnalyzer):
         self.abcd = abcd
         self.color_detection = color_detection
         self.color_inspection = color_inspection
+        self.prompt = prompt
+        self.mapping: dict[ODResult, ODResult] = dict()
         logging.warning(f'kwargs: {kwargs}')
 
     def inspection_target_filter(self, results: list[ODResult]):
@@ -221,6 +222,7 @@ class IllegalEnteringAnalyzer(ODResultAnalyzer):
         return list(filter(lambda x: x.label in self.detection_targets, results))
 
     def do_analyzing(self, results: list[ODResult]):
+        self.mapping.clear()
         for inspection_target in self.inspection_target_filter(results):
             p2 = inspection_target.get_polygon()
             for detection_target in self.detection_target_filter(results):
@@ -228,6 +230,7 @@ class IllegalEnteringAnalyzer(ODResultAnalyzer):
                 if proportion > self.threshold:
                     self.last_results.append(inspection_target)
                     self.last_results.append(detection_target)
+                    self.mapping[detection_target] = inspection_target
 
     def overlay_conclusion(self, image):
         if self.in_ignoring_range():
@@ -236,9 +239,16 @@ class IllegalEnteringAnalyzer(ODResultAnalyzer):
         thickness = get_line_thickness(image)
         for inspection_target in self.inspection_target_filter(self.last_results):
             draw_polygon_outline(image, inspection_target.get_polygon(), thickness, self.color_inspection)
+
         for detection_target in self.detection_target_filter(self.last_results):
             draw_polygon_outline(image, detection_target.get_polygon(), thickness, self.color_detection)
             draw_polygon_outline(image, detection_target.get_polygon(self.abcd), thickness, self.color_detection)
+
+            prompt = self.prompt.replace('{detection_target}', detection_target.label)
+            prompt = prompt.replace('{inspection_target}', self.mapping[detection_target].label)
+            cv2.putText(image, prompt, (detection_target.points[0], detection_target.points[1] - thickness),
+                        cv2.FONT_HERSHEY_COMPLEX, 1, self.color_detection, 2)
+
         self.drew_results = self.last_results
 
     def __str__(self):
