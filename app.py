@@ -531,7 +531,8 @@ class ODInspector(QMainWindow):
         self.frame_seeking_flag = False
         message = 'Playback Stopped' if message is None else message
         logging.info(message)
-        self.frame_input_display.setText(message)
+        if self.show_input:
+            self.frame_input_display.setText(message)
         self.frame_output_display.setText(message)
         self.input_playback_info.clear()
         self.output_playback_info.clear()
@@ -587,6 +588,10 @@ class ODInspector(QMainWindow):
         self.capture = cv2.VideoCapture(self.video_path)
         self.total_frame_number = int(self.capture.get(cv2.CAP_PROP_FRAME_COUNT))
         logging.info(f'Video frame count: {self.total_frame_number}')
+        if self.total_frame_number <= 0:
+            self.video_stop('Frame error, file might be corrupted')
+            return
+
         self.video_fps = self.capture.get(cv2.CAP_PROP_FPS)
         if self.video_fps > 60:
             logging.error(f'Abnormal fps: {self.video_fps}, reset to default fps')
@@ -607,7 +612,7 @@ class ODInspector(QMainWindow):
             super().setWindowTitle(self.APP_NAME)
             return
         if len(title) > 55:
-            title = title[:25] + '...' + title[-25:]
+            title = f'{title[:25]}...{title[-25:]}'
         super().setWindowTitle(f'{self.APP_NAME} - {title}')
 
     def closeEvent(self, event: QtGui.QCloseEvent):

@@ -14,7 +14,7 @@
         "color": [0, 255, 0],
         "ignore_below_frames": 25,
         "minimum_saving_interval": 75,
-            "confidence_filter": {
+        "confidence_filter": {
             "target2": 0.7
         },
         "prompt": "Trespassing: {detection_target}"
