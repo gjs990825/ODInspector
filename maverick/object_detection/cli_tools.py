@@ -1,34 +1,30 @@
 import argparse
 import os
-import time
-
-import cv2
 
 from maverick.object_detection import ImageProcessingHelper, ODServiceInterface
-from maverick.object_detection.analyzer import TrespassingAnalyzer, IllegalEnteringAnalyzer, ODResultAnalyzer
+from maverick.object_detection.analyzer import *
+from maverick.object_detection.utils import camel_to_snake
+
+analyzer_class_names = [cls.__name__ for cls in ODResultAnalyzer.__subclasses__()]
 
 
 def launch(service: ODServiceInterface):
     parser = argparse.ArgumentParser()
     parser.add_argument('--input', type=str, help='source video')
     parser.add_argument('--model_name', type=str, default='yolov5m')
-    parser.add_argument('--trespassing_analyzer', type=str, default=None)
-    parser.add_argument('--illegal_entering_analyzer', type=str, default=None)
+
+    for name in analyzer_class_names:
+        parser.add_argument(f'--{camel_to_snake(name)}', type=str, default=None, help=f'{name} configuration file')
     parser.add_argument('--output_directory', type=str, default='./')
     parser.add_argument('--output_video', type=str, default='output.mp4', help='video result output')
     opt = parser.parse_args()
 
     video_path = opt.input
     model_name = opt.model_name
-    trespassing_analyzer = opt.trespassing_analyzer
-    illegal_entering_analyzer = opt.illegal_entering_analyzer
     output_directory = opt.output_directory
     output_video = opt.output_video
 
-    try:
-        os.mkdir(output_directory)
-    except FileExistsError:
-        pass
+    os.makedirs(output_directory, exist_ok=True)
 
     capture = cv2.VideoCapture(video_path)
     total_frame_number = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -41,10 +37,15 @@ def launch(service: ODServiceInterface):
     recorder = cv2.VideoWriter(output_video_path, cv2.VideoWriter_fourcc(*'mp4v'), int(video_fps), size)
 
     analyzers: list[ODResultAnalyzer] = []
-    if trespassing_analyzer is not None:
-        analyzers.extend(TrespassingAnalyzer.from_file(trespassing_analyzer))
-    if illegal_entering_analyzer is not None:
-        analyzers.extend(IllegalEnteringAnalyzer.from_file(illegal_entering_analyzer))
+
+    for name in analyzer_class_names:
+        config_file = getattr(opt, camel_to_snake(name), None)
+        if config_file is None:
+            continue
+        analyzers.extend(globals()[name].from_file(config_file))
+
+    if len(analyzers) == 0:
+        print('No analyzers configured')
 
     for analyzer in analyzers:
         analyzer.redirect_saving_path(output_directory)

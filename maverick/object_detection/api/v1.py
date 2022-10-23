@@ -4,7 +4,6 @@ import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Optional
-from uuid import UUID
 
 import numpy
 from shapely.geometry import Polygon

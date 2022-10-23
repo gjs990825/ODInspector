@@ -14,10 +14,9 @@ from PyQt6.QtGui import QAction, QIcon
 from PyQt6.QtWidgets import QApplication, QWidget, QPushButton, QMessageBox, QMainWindow, QMenu, QHBoxLayout, QStyle, \
     QSlider, QFileDialog, QVBoxLayout, QLabel, QSizePolicy, QComboBox, QLineEdit, QCheckBox
 
-from maverick.object_detection.analyzer import TrespassingAnalyzer, IllegalEnteringAnalyzer, DeepSortPedestrianAnalyzer, \
-    ObjectMissingAnalyzer
-from maverick.object_detection.api.v1 import ODResult, Model, ODServiceOverNetworkConfig, ODServiceInterface
 from maverick.object_detection import ImageProcessingHelper
+from maverick.object_detection.analyzer import *
+from maverick.object_detection.api.v1 import ODResult, Model, ODServiceOverNetworkConfig, ODServiceInterface
 from maverick.object_detection.utils import clamp, create_in_memory_image, camel_to_snake
 
 logging.basicConfig(level=logging.INFO)
@@ -255,19 +254,11 @@ class ODInspector(QMainWindow):
         analyzer_menu = QMenu('&Analyzer', self)
         menu_bar.addMenu(analyzer_menu)
 
-        def create_analyzer_action(analyzer_cls, shortcut=None):
-            analyzer_name = analyzer_cls.__name__
-            action = QAction(analyzer_name, self)
-            if shortcut is not None:
-                action.setShortcut(shortcut)
+        for analyzer_cls, analyzer_name in [(cls, cls.__name__) for cls in ODResultAnalyzer.__subclasses__()]:
+            action = QAction(f'Add {analyzer_name}', self)
             action.setStatusTip(f'Open {analyzer_name} config file')
-            action.triggered.connect(lambda: self.load_analyzer(analyzer_cls))
-            return action
-
-        analyzer_menu.addAction(create_analyzer_action(TrespassingAnalyzer, 'Ctrl+T'))
-        analyzer_menu.addAction(create_analyzer_action(IllegalEnteringAnalyzer, 'Ctrl+I'))
-        analyzer_menu.addAction(create_analyzer_action(DeepSortPedestrianAnalyzer, 'Ctrl+D'))
-        analyzer_menu.addAction(create_analyzer_action(ObjectMissingAnalyzer))
+            action.triggered.connect(lambda _, cls=analyzer_cls: self.load_analyzer(cls))
+            analyzer_menu.addAction(action)
 
         clear_analyzer_action = QAction('Clear Analyzer', self)
         clear_analyzer_action.setShortcut('Ctrl+Shift+A')
@@ -579,6 +570,7 @@ class ODInspector(QMainWindow):
     def load_analyzer(self, analyzer_cls):
         analyzer_name = analyzer_cls.__name__
         path = os.path.join('configs/', camel_to_snake(analyzer_name) + 's')
+        logging.info(f'Open path: {path}')
         file_name, _ = QFileDialog.getOpenFileName(self, f'Open a {analyzer_name} configuration file', path, '*.json')
         if file_name == '':
             return
