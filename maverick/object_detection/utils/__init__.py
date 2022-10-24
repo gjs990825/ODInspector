@@ -3,9 +3,28 @@ import os
 import re
 from io import BytesIO
 
+import cv2
 import numpy
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 from numpy import ndarray
+
+
+def draw_chinese(img: numpy.ndarray, text: str, position: tuple[int, int], color=(0, 0, 0), size=20):
+    font_style = ImageFont.truetype("font/simhei.ttf", size, encoding="utf-8")
+    pil_image = Image.fromarray(img)
+    draw = ImageDraw.Draw(pil_image)
+    draw.text(position, text, fill=tuple(color), font=font_style)
+    img_drew = numpy.asarray(pil_image)
+    for i in range(len(img)):
+        img[i] = img_drew[i]
+
+
+def draw_text(image: numpy.ndarray, text: str, position: tuple[int, int], color=(0, 0, 0), size=1.5):
+    if text.isascii():
+        cv2.putText(image, text, position, cv2.FONT_HERSHEY_COMPLEX, size, color, 2)
+    else:
+        size = int(size * 30)
+        draw_chinese(image, text, (position[0], position[1] - size), color, size)
 
 
 def camel_to_snake(name):

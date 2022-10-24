@@ -13,6 +13,6 @@
             "minecart": 0.7,
             "person": 0.7
         },
-        "prompt": "Warning: {detection_target} in {inspection_target}"
+        "prompt": "警告：{detection_target}进入{inspection_target}"
     }
 ]

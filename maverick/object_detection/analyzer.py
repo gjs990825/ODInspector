@@ -12,10 +12,8 @@ import numpy
 from PIL import Image
 from shapely.geometry import Polygon
 
-from deep_sort import build_tracker
-from deep_sort.utils.parser import get_config
 from maverick.object_detection.api.v1 import ODResult
-from maverick.object_detection.utils import get_line_thickness, xyxy_to_xywh
+from maverick.object_detection.utils import get_line_thickness, xyxy_to_xywh, draw_text
 from maverick.object_detection.utils.polygon import draw_polygon_outline, in_target_proportion, get_polygon_points
 
 
@@ -32,6 +30,19 @@ class ODResultAnalyzer(ABC):
         self.minimum_saving_interval = minimum_saving_interval
         self.saving_path = saving_path
         self.confidence_filter = confidence_filter
+        self.class_name_converter = None
+
+    @staticmethod
+    def draw_text(image: numpy.ndarray, text: str, position: tuple[int, int], color=(0, 0, 0), size=1.5):
+        draw_text(image, text, position, color, size)
+
+    def set_class_name_converter(self, converter=None):
+        self.class_name_converter = converter
+
+    def get_alter_name(self, name):
+        if self.class_name_converter is None:
+            return name
+        return self.class_name_converter(name)
 
     def filter(self, results: list[ODResult]) -> list[ODResult]:
         if self.confidence_filter is None:
@@ -108,7 +119,7 @@ class ODResultAnalyzer(ABC):
     @classmethod
     def from_file(cls, path):
         analyzers = []
-        with open(path, 'r') as f:
+        with open(path, 'r', encoding='utf-8') as f:
             for analyzer in json.load(f):
                 analyzers.append(cls.from_json(analyzer))
         return analyzers
@@ -164,8 +175,7 @@ class TrespassingAnalyzer(ODResultAnalyzer):
             draw_polygon_outline(image, result.get_polygon(), thickness, self.color)
             draw_polygon_outline(image, result.get_polygon(self.abcd), thickness, self.color)
             prompt = self.prompt.replace('{detection_target}', result.label)
-            cv2.putText(image, prompt, (result.points[0], result.points[1] - thickness), cv2.FONT_HERSHEY_COMPLEX, 1,
-                        self.color, 2)
+            self.draw_text(image, prompt, (result.points[0], result.points[1] - thickness), self.color)
 
 
 class IllegalEnteringAnalyzer(ODResultAnalyzer):
@@ -228,10 +238,12 @@ class IllegalEnteringAnalyzer(ODResultAnalyzer):
             draw_polygon_outline(image, detection_target.get_polygon(), thickness, self.color_detection)
             draw_polygon_outline(image, detection_target.get_polygon(self.abcd), thickness, self.color_detection)
 
-            prompt = self.prompt.replace('{detection_target}', detection_target.label)
-            prompt = prompt.replace('{inspection_target}', self.mapping[detection_target].label)
-            cv2.putText(image, prompt, (detection_target.points[0], detection_target.points[1] - thickness),
-                        cv2.FONT_HERSHEY_COMPLEX, 1, self.color_detection, 2)
+            detection_target_text = self.get_alter_name(detection_target.label)
+            inspection_target_text = self.get_alter_name(self.mapping[detection_target].label)
+            prompt = self.prompt.replace('{detection_target}', detection_target_text)
+            prompt = prompt.replace('{inspection_target}', inspection_target_text)
+            self.draw_text(image, prompt, (detection_target.points[0], detection_target.points[1] - thickness),
+                           self.color_detection)
 
         self.drew_results = self.last_results
 
@@ -241,6 +253,10 @@ class DeepSortPedestrianAnalyzer(ODResultAnalyzer):
                  color: tuple[int, int, int],
                  **kwargs):
         super().__init__(0, -1, None)
+
+        from deep_sort import build_tracker
+        from deep_sort.utils.parser import get_config
+
         cfg = get_config(config_file="deep_sort/configs/deep_sort.yaml")
         cfg.USE_FASTREID = False
         self.tracker = build_tracker(cfg, use_cuda=True)
@@ -280,16 +296,14 @@ class DeepSortPedestrianAnalyzer(ODResultAnalyzer):
             self.last_results.append(od_result)
 
     def overlay_conclusion(self, image):
-        cv2.putText(image, f'Pedestrian Count: {self.max_person_id}',
-                    (50, 50), cv2.FONT_HERSHEY_COMPLEX, 1, self.color, 2)
+        self.draw_text(image, f'Pedestrian Count: {self.max_person_id}', (50, 50), self.color)
 
         for result in self.last_results:
             text = 'PERSON-{} {:.2f}'.format(result.object_id, float(result.confidence))
             thickness = get_line_thickness(image)
             p1, p2 = result.get_anchor2()
             cv2.rectangle(image, p1, p2, self.color, thickness)
-            cv2.putText(image, text, (result.points[0], result.points[1] - thickness), cv2.FONT_HERSHEY_COMPLEX, 1,
-                        self.color, 2)
+            self.draw_text(image, text, (result.points[0], result.points[1] - thickness), self.color)
         self.drew_results = self.person_results
 
 
@@ -381,15 +395,12 @@ class ObjectMissingAnalyzer(ODResultAnalyzer):
                 area_id = self.get_area_id(area)
                 if area_id in self.mapping:
                     x, y = get_polygon_points(area)[0]
-                    cv2.putText(image, f'{self.mapping[area_id]} missing', (x + 50, y + 50),
-                                cv2.FONT_HERSHEY_COMPLEX, 1, self.color_inspection, 2)
+                    self.draw_text(image, f'{self.mapping[area_id]} missing', (x + 50, y + 50), self.color_inspection)
             return
 
         for result in self.last_results:
             draw_polygon_outline(image, result.get_polygon(), thickness, self.color_inspection)
-
-            cv2.putText(image, f'{self.mapping[result]} missing',
-                        (result.points[0], result.points[1] - thickness),
-                        cv2.FONT_HERSHEY_COMPLEX, 1, self.color_inspection, 2)
+            self.draw_text(image, f'{self.mapping[result]} missing', (result.points[0], result.points[1] - thickness),
+                           self.color_inspection)
 
         self.drew_results = self.last_results

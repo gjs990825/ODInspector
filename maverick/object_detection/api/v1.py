@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Optional
@@ -105,14 +106,41 @@ class Model:
     weight_path: str
     class_path: str
     classes: list[str]
+    class_alter_names: list[str]
 
-    def __init__(self, name, weight_path, class_path, classes=None):
+    class ClassNameConverter:
+        class_alter_names: Optional[dict[str, str]] = None
+
+        def __init__(self, class_names: list[str] = None, class_alter_names: list[str] = None):
+            if class_names is None or class_alter_names is None:
+                self.class_alter_names = None
+                return
+
+            self.class_alter_names = dict()
+            for name, alter_name in zip(class_names, class_alter_names):
+                self.class_alter_names[name] = alter_name
+
+        def __call__(self, class_name):
+            if self.class_alter_names is None:
+                return class_name
+
+            if class_name in self.class_alter_names:
+                return self.class_alter_names[class_name]
+
+            logging.warning(f'no class name matched')
+            return class_name
+
+    def __init__(self, name, weight_path, class_path, classes=None, class_alter_names: list[str] = None):
         if classes is None:
             classes = []
         self.name = name
         self.weight_path = weight_path
         self.class_path = class_path
         self.classes = classes
+
+        self.class_alter_names = class_alter_names
+        self.class_name_converter = self.ClassNameConverter(classes, class_alter_names)
+
         if len(classes) == 0 and len(self.class_path) != 0:
             with open(self.class_path, 'r') as f:
                 self.classes = f.read().splitlines()

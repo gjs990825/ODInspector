@@ -3,7 +3,7 @@ import numpy
 
 from maverick.object_detection.analyzer import ODResultAnalyzer
 from maverick.object_detection.api.v1 import ODResult, ODServiceInterface
-from maverick.object_detection.utils import get_colors
+from maverick.object_detection.utils import get_colors, draw_text
 
 
 class ImageProcessingHelper:
@@ -33,7 +33,7 @@ class ImageProcessingHelper:
     def draw_result_image(self, image: numpy.ndarray, results: list[ODResult]):
         thickness = max(int(min((image.shape[1], image.shape[0])) / 150), 1)
         for result in results:
-            label = result.label
+            label = self.service.current_model.class_name_converter(result.label)
             confidence = float(result.confidence)
             if result.object_id is None:
                 text = '{} {:.2f}'.format(label, confidence)
@@ -42,14 +42,16 @@ class ImageProcessingHelper:
             color = self.get_class_color(result.label)
             p1, p2 = result.get_anchor2()
             cv2.rectangle(image, p1, p2, color, thickness)
-            cv2.putText(image, text, (result.points[0], result.points[1] - thickness), cv2.FONT_HERSHEY_COMPLEX, 1,
-                        color, 2)
+            draw_text(image, text, (result.points[0], result.points[1] - thickness), color)
 
     def set_current_model(self, model_name: str):
         self.service.set_current_model(model_name)
         self.colors = get_colors(self.service.get_current_classes())
 
     def set_analyzers(self, analyzers: list[ODResultAnalyzer]):
+        cls_name_converter = self.service.current_model.class_name_converter
+        for item in analyzers:
+            item.set_class_name_converter(cls_name_converter)
         self.analyzers = analyzers
 
     def get_class_color(self, class_name: str) -> tuple[int, int, int]:
