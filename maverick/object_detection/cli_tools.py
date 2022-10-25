@@ -47,14 +47,14 @@ def launch(service: ODServiceInterface):
     if len(analyzers) == 0:
         print('No analyzers configured')
 
-    for analyzer in analyzers:
-        analyzer.redirect_saving_path(output_directory)
-
-    print(analyzers)
-
     processing_helper = ImageProcessingHelper(service, analyzers)
     processing_helper.service.update_models()
     processing_helper.set_current_model(model_name)
+
+    for analyzer in analyzers:
+        analyzer.redirect_saving_path(output_directory)
+        analyzer.set_class_name_converter(service.current_model.class_name_converter)
+    print(analyzers)
 
     output_playback_fps = 0
     output_playback_last_t = time.time()

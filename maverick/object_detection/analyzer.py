@@ -174,7 +174,7 @@ class TrespassingAnalyzer(ODResultAnalyzer):
         for result in self.last_results:
             draw_polygon_outline(image, result.get_polygon(), thickness, self.color)
             draw_polygon_outline(image, result.get_polygon(self.abcd), thickness, self.color)
-            prompt = self.prompt.replace('{detection_target}', result.label)
+            prompt = self.prompt.replace('{detection_target}', self.get_alter_name(result.label))
             self.draw_text(image, prompt, (result.points[0], result.points[1] - thickness), self.color)
 
 
@@ -319,7 +319,7 @@ class ObjectMissingAnalyzer(ODResultAnalyzer):
                  ignore_below_frames: int = 0,
                  minimum_saving_interval: int = -1,
                  confidence_filter: dict[str, float] = None,
-                 prompt: str = 'Warning: {detection_target} not in {inspection_target}',
+                 prompt: str = 'Warning: {missing_targets} not in {inspection_target}',
                  **kwargs):
         super().__init__(ignore_below_frames, minimum_saving_interval, confidence_filter)
         if 'inspection_targets' not in kwargs and 'inspection_areas' not in kwargs:
@@ -381,6 +381,17 @@ class ObjectMissingAnalyzer(ODResultAnalyzer):
                 else:
                     self.mapping[key].append(detection_target)
 
+    def parse_list_text(self, lst: list[str]):
+        text = '['
+        length = len(lst)
+        for i in range(length):
+            name = self.get_alter_name(lst[i])
+            if i != length - 1:
+                text += f'{name}, '
+            else:
+                text += f'{name}'
+        return text + ']'
+
     def overlay_conclusion(self, image):
         thickness = get_line_thickness(image)
         if self.inspection_targets is None:
@@ -395,12 +406,18 @@ class ObjectMissingAnalyzer(ODResultAnalyzer):
                 area_id = self.get_area_id(area)
                 if area_id in self.mapping:
                     x, y = get_polygon_points(area)[0]
-                    self.draw_text(image, f'{self.mapping[area_id]} missing', (x + 50, y + 50), self.color_inspection)
+                    missing_targets = self.parse_list_text(self.mapping[area_id])
+                    prompt = self.prompt.replace('{missing_targets}', missing_targets)
+                    self.draw_text(image, prompt, (x + 50, y + 50), self.color_inspection)
             return
 
         for result in self.last_results:
             draw_polygon_outline(image, result.get_polygon(), thickness, self.color_inspection)
-            self.draw_text(image, f'{self.mapping[result]} missing', (result.points[0], result.points[1] - thickness),
+
+            missing_targets = self.parse_list_text(self.mapping[result])
+            prompt = self.prompt.replace('{missing_targets}', missing_targets)
+            prompt = prompt.replace('{inspection_target}', self.get_alter_name(result.label))
+            self.draw_text(image, prompt, (result.points[0], result.points[1] - thickness),
                            self.color_inspection)
 
         self.drew_results = self.last_results
