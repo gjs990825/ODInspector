@@ -1,12 +1,8 @@
-import logging
 import os
 import queue
 import sys
 import threading
-import time
 
-import cv2
-import numpy
 import requests
 from PyQt6 import QtGui
 from PyQt6.QtCore import QCoreApplication, Qt, QTimerEvent
@@ -14,9 +10,10 @@ from PyQt6.QtGui import QAction, QIcon
 from PyQt6.QtWidgets import QApplication, QWidget, QPushButton, QMessageBox, QMainWindow, QMenu, QHBoxLayout, QStyle, \
     QSlider, QFileDialog, QVBoxLayout, QLabel, QSizePolicy, QComboBox, QLineEdit, QCheckBox
 
-from maverick.object_detection import ImageProcessingHelper
 from maverick.object_detection.analyzer import *
-from maverick.object_detection.api.v1 import ODResult, Model, ODServiceOverNetworkConfig, ODServiceInterface
+from maverick.object_detection.api.v2 import Model, ODServiceOverNetworkConfig, ODServiceInterface, \
+    DetectionSequenceConfig
+from maverick.object_detection.api.v2.helper import ImageProcessingHelper
 from maverick.object_detection.utils import clamp, create_in_memory_image, camel_to_snake
 
 logging.basicConfig(level=logging.INFO)
@@ -38,17 +35,13 @@ class ODServiceOverNetworkClient(ODServiceInterface):
         response = requests.get(self.base + ODServiceOverNetworkConfig.PATH_LIST_MODELS, proxies=self.proxies)
         self.models = Model.from_json(response.json())
 
-    def set_current_model(self, model_name):
-        super().set_current_model(model_name)
-        response = requests.get(self.base + ODServiceOverNetworkConfig.PATH_SET_MODEL,
-                                params={'model_name': model_name},
-                                proxies=self.proxies)
-        logging.debug(f'HTTP response:{response.text}')
-
-    def do_detections(self, image: numpy.ndarray) -> list[ODResult]:
+    def do_detections(self, image: numpy.ndarray, model_names: list[str]) -> list[ODResult]:
         t_s = time.time()
         in_mem_image = create_in_memory_image(image)
-        response = requests.post(self.base + ODServiceOverNetworkConfig.PATH_DETECT_WITH_BINARY, data=in_mem_image,
+        params = {'model_names': model_names}
+        response = requests.post(self.base + ODServiceOverNetworkConfig.PATH_DETECT_WITH_BINARY,
+                                 data=in_mem_image,
+                                 params=params,
                                  proxies=self.proxies)
         logging.debug('Request uses %.4fs' % (time.time() - t_s))
         logging.debug(response.json())
@@ -64,29 +57,29 @@ class ImageProcessingQueue(threading.Thread):
     def __init__(self, helper: ImageProcessingHelper, result_callback):
         super().__init__()
         self.exit_flag = False
-        self.image_queue = queue.Queue(3)
+        self.queue = queue.Queue(3)
         self.callback = result_callback
         self.helper = helper
         self.queue_lock = threading.Lock()
         self.is_processing = False
 
-    def add(self, image):
+    def add(self, item: tuple[numpy.ndarray, str]):
         self.queue_lock.acquire()
-        if self.image_queue.full():
-            self.image_queue.get()  # remove one when full
+        if self.queue.full():
+            self.queue.get()  # remove one when full
             logging.debug('Lagging occurred')
-        self.image_queue.put(image)
+        self.queue.put(item)
         self.queue_lock.release()
 
     def run(self):
         while self.exit_flag is False:
             self.queue_lock.acquire()
-            if not self.image_queue.empty():
-                image = self.image_queue.get()
+            if not self.queue.empty():
+                item = self.queue.get()
                 self.is_processing = True
                 self.queue_lock.release()
                 t_s = time.time()
-                output = self.helper.detect(image)
+                output = self.helper.detect(*item)
                 logging.debug('Detection: %.4fs used' % (time.time() - t_s))
                 self.callback(output)
                 self.is_processing = False
@@ -96,7 +89,7 @@ class ImageProcessingQueue(threading.Thread):
 
     def finished(self):
         self.queue_lock.acquire()
-        ret = self.image_queue.empty()
+        ret = self.queue.empty()
         self.queue_lock.release()
         return ret
 
@@ -129,6 +122,8 @@ class ODInspector(QMainWindow):
         self.frame_jumping_flag = False
         self.frame_jumping_position = None
         self.image_process_queue = None
+        self.configs = None
+        self.current_config = None
 
         self.input_playback_fps = 0.0
         self.input_playback_last_t = 0
@@ -164,12 +159,12 @@ class ODInspector(QMainWindow):
         load_button = QPushButton('Load')
         load_button.clicked.connect(self.load_model_info)
 
-        self.model_combobox = QComboBox()
+        self.config_combobox = QComboBox()
         model_setting_layout.addWidget(QLabel('Server Address:'))
         model_setting_layout.addWidget(self.server_url_input, 4)
         model_setting_layout.addWidget(load_button, 2)
         model_setting_layout.addWidget(QLabel('Select Model:'))
-        model_setting_layout.addWidget(self.model_combobox, 3)
+        model_setting_layout.addWidget(self.config_combobox, 3)
 
         # Slider configuration
         self.frame_position_slider = QSlider(Qt.Orientation.Horizontal)
@@ -347,17 +342,21 @@ class ODInspector(QMainWindow):
         self.server_url = self.server_url_input.text()
         if isinstance(self.processing_helper.service, ODServiceOverNetworkClient):
             self.processing_helper.service.set_base_url(self.server_url)
-        self.model_combobox.clear()
-        for model in self.processing_helper.service.get_models():
-            self.model_combobox.addItem(f'{model.name}: {len(model.classes)}class(es)', model.name)
-        self.model_combobox.currentIndexChanged.connect(
-            lambda: self.change_model(self.model_combobox.currentData()))
-        self.change_model(self.processing_helper.service.get_model_names()[0])
+        self.config_combobox.clear()
 
-    def change_model(self, model_name):
-        if model_name is None:
+        self.configs = DetectionSequenceConfig.from_file('configs/detection_sequence_configs.json')
+        for config in self.configs:
+            self.config_combobox.addItem(f'{config.name}: {len(config.model_names)}model(s)', config)
+        self.config_combobox.currentIndexChanged.connect(
+            lambda: self.change_config(self.config_combobox.currentData()))
+        self.change_config(self.configs[0])
+        self.processing_helper.service.update_models()
+        self.processing_helper.update_colors()
+
+    def change_config(self, config):
+        if config is None:
             return
-        self.processing_helper.set_current_model(model_name)
+        self.current_config = config
 
     def check_frame_seeking(self):
         playback_fps = self.playback_fps()
@@ -404,7 +403,7 @@ class ODInspector(QMainWindow):
             self.current_frame = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
             if self.image_process_queue is not None:
-                self.image_process_queue.add(self.current_frame)
+                self.image_process_queue.add((self.current_frame, self.current_config.model_names))
                 if self.frame_sync:
                     self.image_process_queue.wait_for_complete()
             if self.show_input:

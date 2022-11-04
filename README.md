@@ -89,7 +89,8 @@ class ODService(ODServiceInterface):
 4. Set service and run app
 
 ```python
-from maverick.object_detection import server
+
+from maverick.object_detection.api.v1 import server
 
 if __name__ == '__main__':
     server.service = ODService()

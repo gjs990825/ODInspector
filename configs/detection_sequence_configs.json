@@ -1,0 +1,10 @@
+[
+    {
+        "name": "Test1",
+        "model_names": ["Car Window", "Walk Along Track"]
+    },
+    {
+        "name": "Test2",
+        "model_names": ["yolov5m", "Plate and Ladder"]
+    }
+]
