@@ -429,8 +429,9 @@ class UnsafePassingAnalyzer(ODResultAnalyzer):
             points: list[tuple[int, int]]
             counter_val: int
 
-        def __init__(self, label, max_toleration: int, keep_obj_for: int) -> None:
+        def __init__(self, label, max_toleration: int, min_average_movement, keep_obj_for: int) -> None:
             self.keep_obj_for = keep_obj_for
+            self.min_average_movement = min_average_movement
             self.label = label
             self.max_toleration = max_toleration
             self.records = []
@@ -460,7 +461,7 @@ class UnsafePassingAnalyzer(ODResultAnalyzer):
             flags = []
             for record in self.records:
                 distance = self.get_average_distance(record.points)
-                if distance > 1:
+                if distance >= self.min_average_movement:
                     flags.append(1)
             self.is_moving = sum(flags) != 0
 
@@ -490,6 +491,7 @@ class UnsafePassingAnalyzer(ODResultAnalyzer):
                  confidence_filter: Optional[dict[str, float]],
                  inspection_target: str,
                  max_toleration: int,
+                 min_average_movement: float,
                  keep_obj_for: int,
                  saving_path='./image_output',
                  prompt: str = 'Warning: Unsafe passing',
@@ -498,7 +500,7 @@ class UnsafePassingAnalyzer(ODResultAnalyzer):
         self.prompt = prompt
         self.color = color
         super().__init__(ignore_below_frames, minimum_saving_interval, confidence_filter, saving_path)
-        self.tracker = self.Tracker(inspection_target, max_toleration, keep_obj_for)
+        self.tracker = self.Tracker(inspection_target, max_toleration, min_average_movement, keep_obj_for)
         self.trespassing_analyzer = TrespassingAnalyzer(ignore_below_frames=ignore_below_frames,
                                                         minimum_saving_interval=minimum_saving_interval,
                                                         confidence_filter=confidence_filter,
@@ -510,6 +512,10 @@ class UnsafePassingAnalyzer(ODResultAnalyzer):
     def redirect_saving_path(self, path: str):
         super().redirect_saving_path(path)
         self.trespassing_analyzer.redirect_saving_path(path)
+
+    def save(self, name=None):
+        # saving operating is done by self.trespassing_analyzer
+        pass
 
     def do_analyzing(self, results: list[ODResult]):
         self.tracker.update(results)
