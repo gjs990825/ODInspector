@@ -36,6 +36,27 @@ class ODResult:
             results.append(ODResult(**i))
         return results
 
+    def get_point_at(self, a, b):
+        """
+        |---(a%)----→
+        |    ↓      |
+        |---→*←-----|(c%)
+        |    ↑      |
+        |-----------↓
+        """
+        x_start = self.points[0]
+        y_start = self.points[1]
+        dx = self.points[2] - self.points[0]
+        dy = self.points[3] - self.points[1]
+
+        x = int(dx * (a / 100) + x_start)
+        y = int(dy * (b / 100) + y_start)
+
+        return x, y
+
+    def get_center_point(self):
+        return self.get_point_at(50, 50)
+
     def get_polygon(self, abcd=(0, 100, 0, 100)):
         """
         |---(a%)--------(b%)---→
@@ -79,6 +100,20 @@ class ODResult:
                (self.points[0], self.points[3]), \
                (self.points[2], self.points[3]), \
                (self.points[2], self.points[1])
+
+    @staticmethod
+    def confidence_filter(results: list[ODResult], confidence_filter: Optional[dict[str, float]]) -> list[ODResult]:
+        if confidence_filter is None:
+            return results
+        after = []
+        for result in results:
+            if result.label not in confidence_filter:
+                continue
+            if float(result.confidence) >= confidence_filter[result.label]:
+                after.append(result)
+            else:
+                logging.info(f'Result: {result} has been ditched')
+        return after
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, ODResult):

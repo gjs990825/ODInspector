@@ -2,11 +2,18 @@ import colorsys
 import os
 import re
 from io import BytesIO
+from math import sqrt
 
 import cv2
 import numpy
 from PIL import Image, ImageDraw, ImageFont
 from numpy import ndarray
+
+
+def get_euclidean_distance(p1, p2):
+    x1, y1 = p1[0], p1[1]
+    x2, y2 = p2[0], p2[1]
+    return sqrt(pow(x2 - x1, 2) + pow(y2 - y1, 2))
 
 
 def draw_chinese(img: numpy.ndarray, text: str, position: tuple[int, int], color=(0, 0, 0), size=20):

@@ -14,9 +14,18 @@
         ]
     },
     {
+        "name": "延车道行走",
+        "model_names": ["Walk Along Track"],
+        "analyzer_files": [
+            "configs/analyzers/walk_along_track.json"
+        ]
+    },
+    {
         "name": "车未停稳上下车",
         "model_names": ["Car Window", "Walk Along Track"],
-        "analyzer_files": []
+        "analyzer_files": [
+            "configs/analyzers/jumping_out_of_car.json"
+        ]
     },
     {
         "name": "Test2",

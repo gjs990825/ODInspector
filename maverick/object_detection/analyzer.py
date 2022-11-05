@@ -5,6 +5,7 @@ import logging
 import os.path
 import time
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Optional, Union
 
 import cv2
@@ -13,7 +14,8 @@ from PIL import Image
 from shapely.geometry import Polygon
 
 from maverick.object_detection.api.v1 import ODResult
-from maverick.object_detection.utils import get_line_thickness, xyxy_to_xywh, draw_text
+from maverick.object_detection.utils import get_line_thickness, xyxy_to_xywh, draw_text, get_colors, \
+    get_euclidean_distance
 from maverick.object_detection.utils.polygon import draw_polygon_outline, in_target_proportion, get_polygon_points
 
 
@@ -44,21 +46,8 @@ class ODResultAnalyzer(ABC):
             return name
         return self.class_name_converter(name)
 
-    def filter(self, results: list[ODResult]) -> list[ODResult]:
-        if self.confidence_filter is None:
-            return results
-        after = []
-        for result in results:
-            if result.label not in self.confidence_filter:
-                continue
-            if float(result.confidence) >= self.confidence_filter[result.label]:
-                after.append(result)
-            else:
-                logging.info(f'Result: {result} has been ditched')
-        return after
-
     def analyze(self, results: list[ODResult], image: numpy.ndarray):
-        results = self.filter(results)
+        results = ODResult.confidence_filter(results, self.confidence_filter)
 
         self.current_image = image
         self.last_results.clear()
@@ -119,14 +108,16 @@ class ODResultAnalyzer(ABC):
     @staticmethod
     def from_file(path) -> list[ODResultAnalyzer]:
         analyzers = []
-        analyzer_name_list = [cls.__name__ for cls in ODResultAnalyzer.__subclasses__()]
+        analyzer_dict = dict()
+        for cls in ODResultAnalyzer.__subclasses__():
+            analyzer_dict[cls.__name__] = cls
         with open(path, 'r', encoding='utf-8') as f:
             for analyzer in json.load(f):
                 analyzer_name = analyzer['analyzer_name']
-                if analyzer_name not in analyzer_name_list:
+                if analyzer_name not in analyzer_dict:
                     logging.error(f'no analyzer named {analyzer_name}')
                     continue
-                cls = globals()[analyzer_name]
+                cls = analyzer_dict[analyzer_name]
                 analyzers.append(cls.from_json(analyzer))
         return analyzers
 
@@ -139,7 +130,7 @@ class TrespassingAnalyzer(ODResultAnalyzer):
     color: tuple[int, int, int]
 
     def __init__(self,
-                 forbidden_areas: list[list[int]],
+                 forbidden_areas: list[list[tuple[int, int]]],
                  detection_targets: list[str],
                  threshold: float,
                  abcd: tuple[int, int, int, int],
@@ -427,3 +418,118 @@ class ObjectMissingAnalyzer(ODResultAnalyzer):
                            self.color_inspection)
 
         self.drew_results = self.last_results
+
+
+class UnsafePassingAnalyzer(ODResultAnalyzer):
+    class Tracker:
+        records: list[Record]
+
+        @dataclass
+        class Record:
+            points: list[tuple[int, int]]
+            counter_val: int
+
+        def __init__(self, label, max_toleration: int, keep_obj_for: int) -> None:
+            self.keep_obj_for = keep_obj_for
+            self.label = label
+            self.max_toleration = max_toleration
+            self.records = []
+            self.filter = {label: 0}
+            self.counter = 0
+            self.is_moving = False
+
+        @staticmethod
+        def get_average_distance(points: list[tuple[int, int]]):
+            size = len(points)
+            if size <= 1:
+                return -1
+            distances = []
+            for i in range(size - 1):
+                distances.append(get_euclidean_distance(points[i], points[i + 1]))
+            return sum(distances) / (size - 1)
+
+        def update(self, objs: list[ODResult]):
+            objs = ODResult.confidence_filter(objs, self.filter)
+
+            self.records = [self.Record(record.points[-self.keep_obj_for:], record.counter_val)
+                            for record in self.records if self.counter - record.counter_val < self.keep_obj_for]
+
+            for obj in objs:
+                self.update_single(obj)
+
+            flags = []
+            for record in self.records:
+                distance = self.get_average_distance(record.points)
+                if distance > 1:
+                    flags.append(1)
+            self.is_moving = sum(flags) != 0
+
+            self.counter += 1
+
+        def update_single(self, obj):
+            center_point = obj.get_center_point()
+            candidate: Optional[tuple[float, UnsafePassingAnalyzer.Tracker.Record]] = None
+            for record in self.records:
+                last_point = record.points[-1]
+                distance = get_euclidean_distance(center_point, last_point)
+                if distance > self.max_toleration:
+                    continue
+                if candidate is None or distance < candidate[0]:
+                    candidate = distance, record
+
+            if candidate is None:
+                self.records.append(self.Record([center_point], self.counter))
+            else:
+                candidate[1].points.append(center_point)
+                candidate[1].counter_val = self.counter
+
+    def __init__(self,
+                 ignore_below_frames: int,
+                 minimum_saving_interval: int,
+                 color: tuple[int, int, int],
+                 confidence_filter: Optional[dict[str, float]],
+                 inspection_target: str,
+                 max_toleration: int,
+                 keep_obj_for: int,
+                 saving_path='./image_output',
+                 prompt: str = 'Warning: Unsafe passing',
+                 **kwargs):
+        logging.warning(f'kwargs: {kwargs}')
+        self.prompt = prompt
+        self.color = color
+        super().__init__(ignore_below_frames, minimum_saving_interval, confidence_filter, saving_path)
+        self.tracker = self.Tracker(inspection_target, max_toleration, keep_obj_for)
+        self.trespassing_analyzer = TrespassingAnalyzer(ignore_below_frames=ignore_below_frames,
+                                                        minimum_saving_interval=minimum_saving_interval,
+                                                        confidence_filter=confidence_filter,
+                                                        saving_path=saving_path,
+                                                        color=color,
+                                                        prompt=prompt,
+                                                        **kwargs)
+
+    def redirect_saving_path(self, path: str):
+        super().redirect_saving_path(path)
+        self.trespassing_analyzer.redirect_saving_path(path)
+
+    def do_analyzing(self, results: list[ODResult]):
+        self.tracker.update(results)
+
+    def analyze(self, results: list[ODResult], image: numpy.ndarray):
+        results = super().analyze(results, image)
+        if self.tracker.is_moving:
+            self.trespassing_analyzer.analyze(results, image)
+        return results
+
+    def overlay_conclusion(self, image):
+        thickness = get_line_thickness(image)
+        for record in self.tracker.records:
+            points = record.points
+            colors = get_colors(points)
+            for i in range(len(points) - 1):
+                cv2.line(image, points[i], points[i + 1], colors[i], thickness)
+            cv2.line(image, points[-1], points[-1], colors[-1], thickness * 3)
+
+        if self.tracker.is_moving:
+            self.draw_text(image, self.prompt, (100, 100), self.color)
+            self.trespassing_analyzer.overlay_conclusion(image)
+            self.drew_results = self.trespassing_analyzer.drew_results

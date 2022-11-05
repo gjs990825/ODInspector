@@ -14,7 +14,7 @@ from maverick.object_detection.analyzer import *
 from maverick.object_detection.api.v2 import Model, ODServiceOverNetworkConfig, ODServiceInterface, \
     DetectionConfig
 from maverick.object_detection.api.v2.helper import ImageProcessingHelper
-from maverick.object_detection.utils import clamp, create_in_memory_image, camel_to_snake
+from maverick.object_detection.utils import clamp, create_in_memory_image
 
 logging.basicConfig(level=logging.INFO)
 
