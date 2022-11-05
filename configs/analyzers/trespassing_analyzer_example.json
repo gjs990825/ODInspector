@@ -1,6 +1,6 @@
 [
     {
-        "name": "Group1",
+        "analyzer_name": "TrespassingAnalyzer",
         "forbidden_areas": [
             [[400, 100], [1200, 150], [1100, 600], [300, 500]],
             [[300, 50], [1100, 100], [1000, 500], [200, 400]]
@@ -20,7 +20,7 @@
         "prompt": "Trespassing: {detection_target}"
     },
     {
-        "name": "Group2",
+        "analyzer_name": "TrespassingAnalyzer",
         "forbidden_areas": [
             [[40, 10], [120, 15], [110, 60], [30, 50]],
             [[30, 5], [110, 10], [100, 50], [20, 40]]

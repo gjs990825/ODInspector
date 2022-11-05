@@ -116,11 +116,17 @@ class ODResultAnalyzer(ABC):
     def from_json(cls, json_obj) -> ODResultAnalyzer:
         return cls(**json_obj)
 
-    @classmethod
-    def from_file(cls, path):
+    @staticmethod
+    def from_file(path) -> list[ODResultAnalyzer]:
         analyzers = []
+        analyzer_name_list = [cls.__name__ for cls in ODResultAnalyzer.__subclasses__()]
         with open(path, 'r', encoding='utf-8') as f:
             for analyzer in json.load(f):
+                analyzer_name = analyzer['analyzer_name']
+                if analyzer_name not in analyzer_name_list:
+                    logging.error(f'no analyzer named {analyzer_name}')
+                    continue
+                cls = globals()[analyzer_name]
                 analyzers.append(cls.from_json(analyzer))
         return analyzers
 

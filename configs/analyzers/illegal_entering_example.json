@@ -1,6 +1,6 @@
 [
     {
-        "name": "Group1",
+        "analyzer_name": "IllegalEnteringAnalyzer",
         "inspection_targets": ["minecart"],
         "detection_targets": ["person"],
         "threshold": 0.7,

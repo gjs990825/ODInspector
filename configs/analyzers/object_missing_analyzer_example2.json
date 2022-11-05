@@ -1,7 +1,9 @@
 [
     {
-        "name": "Group1",
-        "inspection_targets": ["person"],
+        "analyzer_name": "ObjectMissingAnalyzer",
+        "inspection_areas": [
+            [[400, 100], [2200, 100], [2100, 1000], [400, 1000]]
+        ],
         "detection_targets": ["glove", "helmet"],
         "threshold": 0.5,
         "abcd": [0, 100, 0, 100],

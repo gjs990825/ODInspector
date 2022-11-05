@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import QApplication, QWidget, QPushButton, QMessageBox, QMa
 
 from maverick.object_detection.analyzer import *
 from maverick.object_detection.api.v2 import Model, ODServiceOverNetworkConfig, ODServiceInterface, \
-    DetectionSequenceConfig
+    DetectionConfig
 from maverick.object_detection.api.v2.helper import ImageProcessingHelper
 from maverick.object_detection.utils import clamp, create_in_memory_image, camel_to_snake
 
@@ -249,11 +249,10 @@ class ODInspector(QMainWindow):
         analyzer_menu = QMenu('&Analyzer', self)
         menu_bar.addMenu(analyzer_menu)
 
-        for analyzer_cls, analyzer_name in [(cls, cls.__name__) for cls in ODResultAnalyzer.__subclasses__()]:
-            action = QAction(f'Add {analyzer_name}', self)
-            action.setStatusTip(f'Open {analyzer_name} config file')
-            action.triggered.connect(lambda _, cls=analyzer_cls: self.load_analyzer(cls))
-            analyzer_menu.addAction(action)
+        action = QAction(f'Add a Analyzer', self)
+        action.setStatusTip(f'Open a analyzer config file')
+        action.triggered.connect(lambda: self.load_analyzer())
+        analyzer_menu.addAction(action)
 
         clear_analyzer_action = QAction('Clear Analyzer', self)
         clear_analyzer_action.setShortcut('Ctrl+Shift+A')
@@ -344,9 +343,10 @@ class ODInspector(QMainWindow):
             self.processing_helper.service.set_base_url(self.server_url)
         self.config_combobox.clear()
 
-        self.configs = DetectionSequenceConfig.from_file('configs/detection_sequence_configs.json')
+        self.configs = DetectionConfig.from_file('configs/detection_configs.json')
         for config in self.configs:
-            self.config_combobox.addItem(f'{config.name}: {len(config.model_names)}model(s)', config)
+            self.config_combobox.addItem(f'{config.name}: {len(config.model_names)}model(s),'
+                                         f' {len(config.analyzer_files)}analyzer(s)', config)
         self.config_combobox.currentIndexChanged.connect(
             lambda: self.change_config(self.config_combobox.currentData()))
         self.change_config(self.configs[0])
@@ -357,6 +357,10 @@ class ODInspector(QMainWindow):
         if config is None:
             return
         self.current_config = config
+        analyzers = []
+        for analyzer_path in config.analyzer_files:
+            analyzers.extend(ODResultAnalyzer.from_file(analyzer_path))
+        self.processing_helper.set_analyzers(analyzers)
 
     def check_frame_seeking(self):
         playback_fps = self.playback_fps()
@@ -440,9 +444,11 @@ class ODInspector(QMainWindow):
 
     def display_current_frame(self):
         now = time.time()
-        self.input_playback_fps = (self.input_playback_fps + (1.0 / (now - self.input_playback_last_t))) / 2
-        self.input_playback_last_t = now
-        self.input_playback_info.setText("Input: %.1f FPS" % self.input_playback_fps)
+        interval = now - self.input_playback_last_t
+        if interval != 0:
+            self.input_playback_fps = (self.input_playback_fps + (1.0 / interval)) / 2
+            self.input_playback_last_t = now
+            self.input_playback_info.setText("Input: %.1f FPS" % self.input_playback_fps)
 
         self.ui_image_process(self.current_frame, self.frame_input_display)
         logging.debug(f'Showing {self.frame_position}th frame')
@@ -451,9 +457,11 @@ class ODInspector(QMainWindow):
         self.current_output_frame = image
 
         now = time.time()
-        self.output_playback_fps = (self.output_playback_fps + (1.0 / (now - self.output_playback_last_t))) / 2
-        self.output_playback_last_t = now
-        self.output_playback_info.setText("Output: %.1f FPS" % self.output_playback_fps)
+        interval = now - self.output_playback_last_t
+        if interval != 0:
+            self.output_playback_fps = (self.output_playback_fps + (1.0 / interval)) / 2
+            self.output_playback_last_t = now
+            self.output_playback_info.setText("Output: %.1f FPS" % self.output_playback_fps)
 
         self.ui_image_process(self.current_output_frame, self.frame_output_display)
 
@@ -566,15 +574,14 @@ class ODInspector(QMainWindow):
         self.video_path = file_name
         self.load_video()
 
-    def load_analyzer(self, analyzer_cls):
-        analyzer_name = analyzer_cls.__name__
-        path = os.path.join('configs/', camel_to_snake(analyzer_name) + 's')
-        logging.info(f'Open path: {path}')
-        file_name, _ = QFileDialog.getOpenFileName(self, f'Open a {analyzer_name} configuration file', path, '*.json')
+    def load_analyzer(self):
+        file_name, _ = QFileDialog.getOpenFileName(self,
+                                                   f'Open a analyzer configuration file',
+                                                   'configs/analyzers',
+                                                   '*.json')
         if file_name == '':
             return
-        logging.info(f'Open file {file_name} for {analyzer_name}')
-        analyzers = analyzer_cls.from_file(file_name)
+        analyzers = ODResultAnalyzer.from_file(file_name)
         self.processing_helper.set_analyzers(analyzers)
 
     def load_video(self):

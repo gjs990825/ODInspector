@@ -1,27 +1,28 @@
 import json
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 import numpy
 
-from abc import ABC, abstractmethod
 from maverick.object_detection.api.v1 import Model, ODResult
 
 
 @dataclass
-class DetectionSequenceConfig:
+class DetectionConfig:
     name: str
     model_names: list[str]
+    analyzer_files: list[str]
 
     @staticmethod
     def from_json(json_obj):
-        return DetectionSequenceConfig(**json_obj)
+        return DetectionConfig(**json_obj)
 
     @staticmethod
     def from_file(path):
         configs = []
         with open(path, 'r', encoding='utf-8') as f:
             for config in json.load(f):
-                configs.append(DetectionSequenceConfig.from_json(config))
+                configs.append(DetectionConfig.from_json(config))
         return configs
 
 
