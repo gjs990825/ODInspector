@@ -51,11 +51,22 @@ class ODServiceInterface(ABC):
     def do_detections(self, image: numpy.ndarray, model_names: list[str]) -> list[ODResult]:
         pass
 
-    def convert_name(self, label) -> str:
+    def convert_name(self, label: str) -> str:
         for model in self.models:
             if label in model.classes:
                 return model.class_name_converter(label)
         return label
+
+    @staticmethod
+    def convert_name_for(label: str, models: list[Model]) -> str:
+        for model in models:
+            if label in model.classes:
+                return model.class_name_converter(label)
+        return label
+
+    def get_name_converter(self, model_names: list[str]):
+        models = [model for model in self.models if model.name in model_names]
+        return lambda label, models=models: ODServiceInterface.convert_name_for(label, models)
 
     def get_current_classes(self) -> list[str]:
         classes = set()

@@ -28,8 +28,8 @@
         ]
     },
     {
-        "name": "Test2",
-        "model_names": ["yolov5m", "Plate and Ladder"],
+        "name": "Yolov5m",
+        "model_names": ["yolov5m"],
         "analyzer_files": []
     }
 ]

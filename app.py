@@ -62,6 +62,7 @@ class ImageProcessingQueue(threading.Thread):
         self.helper = helper
         self.queue_lock = threading.Lock()
         self.is_processing = False
+        self.start()
 
     def add(self, item: tuple[numpy.ndarray, str]):
         self.queue_lock.acquire()
@@ -108,6 +109,7 @@ class ODInspector(QMainWindow):
     def __init__(self):
         super().__init__()
 
+        self.camera_mode = False
         self.recorder = None
         self.capture = None
         self.video_path = None
@@ -278,6 +280,13 @@ class ODInspector(QMainWindow):
         open_action.triggered.connect(self.open_video_file)
         file_menu.addAction(open_action)
 
+        open_camera_icon = self.style().standardIcon(QStyle.StandardPixmap.SP_DriveDVDIcon)
+        open_camera_action = QAction(open_camera_icon, '&Open Camera', self)
+        open_camera_action.setShortcut('Ctrl+Shift+O')
+        open_camera_action.setStatusTip('Open camera stream')
+        open_camera_action.triggered.connect(self.open_camera)
+        file_menu.addAction(open_camera_action)
+
         exit_icon = self.style().standardIcon(QStyle.StandardPixmap.SP_TitleBarCloseButton)
         exit_action = QAction(exit_icon, '&Exit', self)
         exit_action.setShortcut('Ctrl+Q')
@@ -360,6 +369,7 @@ class ODInspector(QMainWindow):
         analyzers = []
         for analyzer_path in config.analyzer_files:
             analyzers.extend(ODResultAnalyzer.from_file(analyzer_path))
+        self.processing_helper.set_model_names(config.model_names)
         self.processing_helper.set_analyzers(analyzers)
 
     def check_frame_seeking(self):
@@ -373,34 +383,39 @@ class ODInspector(QMainWindow):
         if event.timerId() == self.video_timer_id:
             self.video_timer_handler()
 
+    def frame_seeking_and_jumping(self):
+        if self.frame_seeking_flag:
+            if self.frame_position >= self.frame_seeking_position:
+                logging.warning(f'Can not seek backwards')
+                self.frame_position += 1
+            else:
+                t_s = time.time()
+                for i in range(int(self.frame_position), int(self.frame_seeking_position) - 1):
+                    self.capture.grab()  # grab() does not process frame data, for performance improvement
+                self.frame_position = self.frame_seeking_position
+                t = time.time() - t_s
+                logging_using = logging.debug if self.playback_speed > 1.0 else logging.info
+                logging_using('Seeking from %.1f to %.1f, %.3fs used' %
+                              (self.frame_position, self.frame_seeking_position, t))
+            self.frame_seeking_flag = False
+        if self.frame_jumping_flag:
+            t_s = time.time()
+            self.capture.set(cv2.CAP_PROP_POS_FRAMES, self.frame_jumping_position)
+            t = time.time() - t_s
+            logging.info('Jumping from %.1f to %.1f, %.3fs used' %
+                         (self.frame_position, self.frame_jumping_position, t))
+            self.frame_position = self.frame_jumping_position
+            self.frame_jumping_flag = False
+
     def video_timer_handler(self):
         self.check_frame_seeking()
 
-        if not self.frame_jumping_flag and not self.frame_seeking_flag:
-            self.frame_position += 1
-        else:
-            if self.frame_seeking_flag:
-                if self.frame_position >= self.frame_seeking_position:
-                    logging.warning(f'Can not seek backwards')
-                    self.frame_position += 1
-                else:
-                    t_s = time.time()
-                    for i in range(int(self.frame_position), int(self.frame_seeking_position) - 1):
-                        self.capture.grab()  # grab() does not process frame data, for performance improvement
-                    self.frame_position = self.frame_seeking_position
-                    t = time.time() - t_s
-                    logging_using = logging.debug if self.playback_speed > 1.0 else logging.info
-                    logging_using('Seeking from %.1f to %.1f, %.3fs used' %
-                                  (self.frame_position, self.frame_seeking_position, t))
-                self.frame_seeking_flag = False
-            if self.frame_jumping_flag:
-                t_s = time.time()
-                self.capture.set(cv2.CAP_PROP_POS_FRAMES, self.frame_jumping_position)
-                t = time.time() - t_s
-                logging.info('Jumping from %.1f to %.1f, %.3fs used' %
-                             (self.frame_position, self.frame_jumping_position, t))
-                self.frame_position = self.frame_jumping_position
-                self.frame_jumping_flag = False
+        if not self.camera_mode:
+            if not self.frame_jumping_flag and not self.frame_seeking_flag:
+                self.frame_position += 1
+            else:
+                self.frame_seeking_and_jumping()
+            self.frame_position_slider.setValue(int(self.frame_position))
 
         success, img = self.capture.read()
         if success:
@@ -412,8 +427,6 @@ class ODInspector(QMainWindow):
                     self.image_process_queue.wait_for_complete()
             if self.show_input:
                 self.display_current_frame()
-
-            self.frame_position_slider.setValue(int(self.frame_position))
         else:
             playback_end = self.frame_position >= self.total_frame_number
 
@@ -566,6 +579,30 @@ class ODInspector(QMainWindow):
         self.fps_display.setText('<b>%.2fx -> %.2f FPS</b>' %
                                  (self.playback_speed, self.video_fps * self.playback_speed))
 
+    def open_camera(self):
+        logging.info(f'Using camera...')
+        self.camera_mode = True
+        self.capture = cv2.VideoCapture(0)
+        self.total_frame_number = int(self.capture.get(cv2.CAP_PROP_FRAME_COUNT))
+        logging.info(f'Video frame count: {self.total_frame_number}')
+
+        self.video_fps = self.capture.get(cv2.CAP_PROP_FPS)
+        if self.video_fps > 60:
+            logging.error(f'Abnormal fps: {self.video_fps}, reset to default fps')
+            self.video_fps = 25
+        else:
+            logging.info(f'Video fps: {self.video_fps}')
+
+        self.widgets_enabled(False)
+        self.button_pause_resume.setEnabled(True)
+        self.button_stop.setEnabled(True)
+
+        self.frame_position = 0
+        self.setWindowTitle('Capturing from default camera...')
+        self.set_playback_speed(1.0)
+        self.image_process_queue = ImageProcessingQueue(self.processing_helper, self.display_output_frame)
+        self.video_resume()
+
     def open_video_file(self):
         file_name, _ = QFileDialog.getOpenFileName(self, 'Open a video file', 'videos', '*.mp4;;All Files(*)')
         if file_name == '':
@@ -604,7 +641,6 @@ class ODInspector(QMainWindow):
         self.widgets_enabled(True)
         self.set_playback_speed(1.0)
         self.image_process_queue = ImageProcessingQueue(self.processing_helper, self.display_output_frame)
-        self.image_process_queue.start()
         self.video_resume()
 
     def setWindowTitle(self, title: str = None):

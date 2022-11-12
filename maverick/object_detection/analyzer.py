@@ -249,7 +249,7 @@ class DeepSortPedestrianAnalyzer(ODResultAnalyzer):
     def __init__(self,
                  color: tuple[int, int, int],
                  **kwargs):
-        super().__init__(0, -1, None)
+        super().__init__(0, -1, {'person': 0.0})
 
         from deep_sort import build_tracker
         from deep_sort.utils.parser import get_config

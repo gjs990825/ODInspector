@@ -13,6 +13,7 @@ class ImageProcessingHelper:
 
     def __init__(self, service: ODServiceInterface, analyzers: list[ODResultAnalyzer] = None):
         super().__init__()
+        self.name_converter = None
         self.service = service
         self.colors = []
         self.analyzers = analyzers if analyzers is not None else []
@@ -33,7 +34,11 @@ class ImageProcessingHelper:
     def draw_result_image(self, image: numpy.ndarray, results: list[ODResult]):
         thickness = max(int(min((image.shape[1], image.shape[0])) / 150), 1)
         for result in results:
-            label = self.service.convert_name(result.label)
+            if self.name_converter is not None:
+                label = self.name_converter(result.label)
+            else:
+                label = result.label
+
             confidence = float(result.confidence)
             if result.object_id is None:
                 text = '{} {:.2f}'.format(label, confidence)
@@ -48,9 +53,8 @@ class ImageProcessingHelper:
         self.colors = get_colors(self.service.get_current_classes())
 
     def set_analyzers(self, analyzers: list[ODResultAnalyzer]):
-        cls_name_converter = self.service.convert_name
         for item in analyzers:
-            item.set_class_name_converter(cls_name_converter)
+            item.set_class_name_converter(self.name_converter)
         self.analyzers = analyzers
 
     def get_class_color(self, class_name: str) -> tuple[int, int, int]:
@@ -62,3 +66,6 @@ class ImageProcessingHelper:
 
     def get_model_names(self):
         return self.service.get_model_names()
+
+    def set_model_names(self, model_names):
+        self.name_converter = self.service.get_name_converter(model_names)
