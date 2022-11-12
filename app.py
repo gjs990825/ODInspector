@@ -112,7 +112,6 @@ class ODInspector(QMainWindow):
         self.camera_mode = False
         self.recorder = None
         self.capture = None
-        self.video_path = None
         self.video_fps = None
         self.total_frame_number = None
         self.frame_position = None
@@ -536,7 +535,6 @@ class ODInspector(QMainWindow):
             self.capture.release()
             self.capture = None
         self.current_frame = None
-        self.video_path = None
         self.total_frame_number = None
         self.frame_position = None
         self.video_timer_id = None
@@ -550,6 +548,7 @@ class ODInspector(QMainWindow):
         self.input_playback_info.clear()
         self.output_playback_info.clear()
         self.widgets_enabled(False)
+        self.camera_mode = False
         self.fps_display.clear()
         self.setWindowTitle()
         self.statusBar().showMessage(message)
@@ -580,6 +579,7 @@ class ODInspector(QMainWindow):
                                  (self.playback_speed, self.video_fps * self.playback_speed))
 
     def open_camera(self):
+        self.video_stop()
         logging.info(f'Using camera...')
         self.camera_mode = True
         self.capture = cv2.VideoCapture(0)
@@ -608,8 +608,7 @@ class ODInspector(QMainWindow):
         if file_name == '':
             return
         logging.info(f'Video file: {file_name}')
-        self.video_path = file_name
-        self.load_video()
+        self.load_video(file_name)
 
     def load_analyzer(self):
         file_name, _ = QFileDialog.getOpenFileName(self,
@@ -621,8 +620,9 @@ class ODInspector(QMainWindow):
         analyzers = ODResultAnalyzer.from_file(file_name)
         self.processing_helper.set_analyzers(analyzers)
 
-    def load_video(self):
-        self.capture = cv2.VideoCapture(self.video_path)
+    def load_video(self, file_name):
+        self.video_stop()
+        self.capture = cv2.VideoCapture(file_name)
         self.total_frame_number = int(self.capture.get(cv2.CAP_PROP_FRAME_COUNT))
         logging.info(f'Video frame count: {self.total_frame_number}')
         if self.total_frame_number <= 0:
@@ -637,7 +637,7 @@ class ODInspector(QMainWindow):
             logging.info(f'Video fps: {self.video_fps}')
         self.frame_position = 0
         self.frame_position_slider.setRange(0, self.total_frame_number)
-        self.setWindowTitle(self.video_path)
+        self.setWindowTitle(file_name)
         self.widgets_enabled(True)
         self.set_playback_speed(1.0)
         self.image_process_queue = ImageProcessingQueue(self.processing_helper, self.display_output_frame)
