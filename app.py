@@ -44,9 +44,15 @@ class ODServiceOverNetworkClient(ODServiceInterface):
                                  params=params,
                                  proxies=self.proxies)
         logging.debug('Request uses %.4fs' % (time.time() - t_s))
-        logging.debug(response.json())
-        results = ODResult.from_json(response.json())
-        logging.debug(results)
+        from requests import JSONDecodeError
+        try:
+            j = response.json()
+            logging.debug(j)
+            results = ODResult.from_json(j)
+            logging.debug(results)
+        except JSONDecodeError as e:
+            logging.error(e)
+            results = []
         return results
 
     def set_base_url(self, url):
@@ -250,10 +256,11 @@ class ODInspector(QMainWindow):
         analyzer_menu = QMenu('&Analyzer', self)
         menu_bar.addMenu(analyzer_menu)
 
-        action = QAction(f'Add a Analyzer', self)
-        action.setStatusTip(f'Open a analyzer config file')
-        action.triggered.connect(lambda: self.load_analyzer())
-        analyzer_menu.addAction(action)
+        add_analyzer_action = QAction(f'Add a Analyzer', self)
+        add_analyzer_action.setStatusTip(f'Open a analyzer config file')
+        add_analyzer_action.setShortcut('Ctrl+A')
+        add_analyzer_action.triggered.connect(lambda: self.load_analyzer())
+        analyzer_menu.addAction(add_analyzer_action)
 
         clear_analyzer_action = QAction('Clear Analyzer', self)
         clear_analyzer_action.setShortcut('Ctrl+Shift+A')
@@ -357,8 +364,8 @@ class ODInspector(QMainWindow):
                                          f' {len(config.analyzer_files)}analyzer(s)', config)
         self.config_combobox.currentIndexChanged.connect(
             lambda: self.change_config(self.config_combobox.currentData()))
-        self.change_config(self.configs[0])
         self.processing_helper.service.update_models()
+        self.change_config(self.configs[0])
         self.processing_helper.update_colors()
 
     def change_config(self, config):

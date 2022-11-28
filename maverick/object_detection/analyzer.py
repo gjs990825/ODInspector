@@ -286,18 +286,18 @@ class DeepSortPedestrianAnalyzer(ODResultAnalyzer):
         identities = outputs[:, -1]
         logging.debug(f'xyxy: {bbox_xyxy}, id: {identities}')
 
-        for xyxy, identity, confidence in zip(bbox_xyxy, identities, confidences):
+        for xyxy, identity in zip(bbox_xyxy, identities):
             identity = int(identity)
             self.max_person_id = max(self.max_person_id, identity)
-            od_result = ODResult(str(confidence), 'person', xyxy, 'rectangle', identity)
+            od_result = ODResult('-1', 'person', xyxy, 'rectangle', identity)
             self.last_results.append(od_result)
 
     def overlay_conclusion(self, image):
         self.draw_text(image, f'Pedestrian Count: {self.max_person_id}', (50, 50), self.color)
+        thickness = get_line_thickness(image)
 
         for result in self.last_results:
             text = 'PERSON-{} {:.2f}'.format(result.object_id, float(result.confidence))
-            thickness = get_line_thickness(image)
             p1, p2 = result.get_anchor2()
             cv2.rectangle(image, p1, p2, self.color, thickness)
             self.draw_text(image, text, (result.points[0], result.points[1] - thickness), self.color)

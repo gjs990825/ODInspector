@@ -43,8 +43,9 @@ def launch(service: ODServiceInterface):
         print('No analyzers configured')
 
     processing_helper = ImageProcessingHelper(service, analyzers)
-    processing_helper.set_analyzers(analyzers)
     processing_helper.service.update_models()
+    processing_helper.set_model_names(config.model_names)
+    processing_helper.set_analyzers(analyzers)
     processing_helper.update_colors()
 
     for analyzer in analyzers:
