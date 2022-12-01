@@ -41,3 +41,8 @@ def detection_using_binary():
 @app.route(ODServiceOverNetworkConfig.PATH_LIST_MODELS)
 def list_models():
     return service.models
+
+@app.route(ODServiceOverNetworkConfig.PATH_PRELOAD_MODEL + '<model_name>')
+def preload_model(model_name):
+    service.preload(model_name)
+

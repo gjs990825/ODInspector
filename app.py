@@ -55,6 +55,10 @@ class ODServiceOverNetworkClient(ODServiceInterface):
             results = []
         return results
 
+    def preload(self, model_name) -> None:
+        response = requests.get(self.base + ODServiceOverNetworkConfig.PATH_PRELOAD_MODEL + model_name, proxies=self.proxies)
+        logging.info(f'preload: {response.text}')
+
     def set_base_url(self, url):
         self.base = url
 

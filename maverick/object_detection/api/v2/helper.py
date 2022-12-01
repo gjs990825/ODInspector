@@ -69,3 +69,4 @@ class ImageProcessingHelper:
 
     def set_model_names(self, model_names):
         self.name_converter = self.service.get_name_converter(model_names)
+        any(map(self.service.preload, model_names))

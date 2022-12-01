@@ -44,6 +44,10 @@ class ODServiceInterface(ABC):
         return [model.name for model in self.get_models()]
 
     @abstractmethod
+    def preload(self, model_name) -> None:
+        pass
+
+    @abstractmethod
     def update_models(self) -> None:
         pass
 
@@ -78,3 +82,4 @@ class ODServiceInterface(ABC):
 class ODServiceOverNetworkConfig:
     PATH_DETECT_WITH_BINARY = "/api/v2/detect_with_binary/"
     PATH_LIST_MODELS = "/api/v2/model/list"
+    PATH_PRELOAD_MODEL = "/api/v2/model/preload/"

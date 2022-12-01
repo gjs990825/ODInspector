@@ -1,0 +1,16 @@
+[
+    {
+        "name": "Config1",
+        "model_names": ["model1", "model2"],
+        "analyzer_files": [
+            "configs/analyzers/illegal_entering_example.json"
+        ]
+    },
+    {
+        "name": "Config2",
+        "model_names": ["model3"],
+        "analyzer_files": [
+            "configs/analyzers/trespassing_analyzer_example.json"
+        ]
+    }
+]
