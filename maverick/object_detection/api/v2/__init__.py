@@ -71,6 +71,7 @@ class ODServiceInterface(ABC):
     def get_name_converter(self, model_names: list[str]):
         models = [model for model in self.models if model.name in model_names]
         return lambda label, models=models: ODServiceInterface.convert_name_for(label, models)
+        # TODO nani kore? WHY I did this?
 
     def get_current_classes(self) -> list[str]:
         classes = set()

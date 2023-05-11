@@ -66,51 +66,55 @@ class ODServiceOverNetworkClient(ODServiceInterface):
 class ImageProcessingQueue(threading.Thread):
     def __init__(self, helper: ImageProcessingHelper, result_callback):
         super().__init__()
-        self.exit_flag = False
+        self.keep_running = True
+        self.stopped = False
         self.queue = queue.Queue(3)
         self.callback = result_callback
         self.helper = helper
-        self.queue_lock = threading.Lock()
+        self.queue_lock = threading.Lock() # TODO upgrade to yolov7!!!!
+        self.queue_semaphore = threading.Semaphore(0)
         self.is_processing = False
         self.start()
 
     def add(self, item: tuple[numpy.ndarray, str]):
-        self.queue_lock.acquire()
-        if self.queue.full():
-            self.queue.get()  # remove one when full
-            logging.debug('Lagging occurred')
-        self.queue.put(item)
-        self.queue_lock.release()
+        with self.queue_lock:
+            if self.queue.full():
+                self.queue.get()  # remove one when full
+                logging.debug('Lagging occurred')
+            self.queue.put(item)
+        self.queue_semaphore.release(1)
 
     def run(self):
-        while self.exit_flag is False:
-            self.queue_lock.acquire()
-            if not self.queue.empty():
-                item = self.queue.get()
-                self.is_processing = True
-                self.queue_lock.release()
+        while self.keep_running:
+            # with statement does not work here??
+            if not self.queue_semaphore.acquire(timeout=.5):
+                continue
+            item = None
+            with self.queue_lock:
+                if not self.queue.empty():
+                    item = self.queue.get()
+                    self.is_processing = True
+            if item is not None:
                 t_s = time.time()
                 output = self.helper.detect(*item)
                 logging.debug('Detection: %.4fs used' % (time.time() - t_s))
                 self.callback(output)
                 self.is_processing = False
-            else:
-                self.queue_lock.release()
-            time.sleep(0.01)  # TODO This loop runs too frequently
+        self.stopped = True
+
 
     def finished(self):
-        self.queue_lock.acquire()
-        ret = self.queue.empty()
-        self.queue_lock.release()
-        return ret
+        with self.queue_lock:
+            return self.queue.empty()
 
     def wait_for_complete(self):
         while not self.finished() or self.is_processing:
             time.sleep(0.01)
 
-    def exit(self):
-        self.exit_flag = True
-        self.join()
+    def join(self, timeout: float | None = ...) -> None:
+        self.keep_running = False
+        while not self.stopped:
+            pass
 
 
 class ODInspector(QMainWindow):
@@ -471,7 +475,7 @@ class ODInspector(QMainWindow):
         if interval != 0:
             self.input_playback_fps = (self.input_playback_fps + (1.0 / interval)) / 2
             self.input_playback_last_t = now
-            self.input_playback_info.setText("Input: %.1f FPS" % self.input_playback_fps)
+            self.input_playback_info.setText("Input: %5.1f FPS" % self.input_playback_fps)
 
         self.ui_image_process(self.current_frame, self.frame_input_display)
         logging.debug(f'Showing {self.frame_position}th frame')
@@ -484,7 +488,7 @@ class ODInspector(QMainWindow):
         if interval != 0:
             self.output_playback_fps = (self.output_playback_fps + (1.0 / interval)) / 2
             self.output_playback_last_t = now
-            self.output_playback_info.setText("Output: %.1f FPS" % self.output_playback_fps)
+            self.output_playback_info.setText("Output: %5.1f FPS" % self.output_playback_fps)
 
         self.ui_image_process(self.current_output_frame, self.frame_output_display)
 
@@ -540,7 +544,7 @@ class ODInspector(QMainWindow):
 
     def video_stop(self, message=None):
         if self.image_process_queue is not None:
-            self.image_process_queue.exit()
+            self.image_process_queue.join()
         self.video_pause()
         if self.capture is not None:
             self.capture.release()

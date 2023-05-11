@@ -248,6 +248,7 @@ class IllegalEnteringAnalyzer(ODResultAnalyzer):
 class DeepSortPedestrianAnalyzer(ODResultAnalyzer):
     def __init__(self,
                  color: tuple[int, int, int],
+                 prompt: str,
                  **kwargs):
         super().__init__(0, -1, {'person': 0.0})
 
@@ -257,11 +258,10 @@ class DeepSortPedestrianAnalyzer(ODResultAnalyzer):
         cfg = get_config(config_file="deep_sort/configs/deep_sort.yaml")
         cfg.USE_FASTREID = False
         self.tracker = build_tracker(cfg, use_cuda=True)
-        self.size = 1280, 720
-        self.outputs = None
         self.person_results: list[ODResult] = []
         self.max_person_id = 0
         self.color = color
+        self.prompt = prompt
         logging.warning(f'kwargs: {kwargs}')
 
     def do_analyzing(self, results: list[ODResult]):
@@ -293,11 +293,12 @@ class DeepSortPedestrianAnalyzer(ODResultAnalyzer):
             self.last_results.append(od_result)
 
     def overlay_conclusion(self, image):
-        self.draw_text(image, f'Pedestrian Count: {self.max_person_id}', (50, 50), self.color)
+        text = self.prompt.replace('{person}', str(self.max_person_id))
+        self.draw_text(image, text, (50, 50), self.color)
         thickness = get_line_thickness(image)
 
         for result in self.last_results:
-            text = 'PERSON-{} {:.2f}'.format(result.object_id, float(result.confidence))
+            text = '{}-{}'.format(self.get_alter_name('person'),result.object_id)
             p1, p2 = result.get_anchor2()
             cv2.rectangle(image, p1, p2, self.color, thickness)
             self.draw_text(image, text, (result.points[0], result.points[1] - thickness), self.color)
